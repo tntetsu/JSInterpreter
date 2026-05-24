@@ -2,17 +2,20 @@
 
 [![CI](https://github.com/tntetsu/JSInterpreter/actions/workflows/ci.yml/badge.svg)](https://github.com/tntetsu/JSInterpreter/actions/workflows/ci.yml)
 
-JavaScript で書かれた JavaScript インタープリターです。ES6+ 構文をサポートし、**式単位のステップ実行 API**（ステップイン・ステップオーバー・ステップアウト・ステップバック）を提供します。
+> 🌐 [日本語版](README.ja.md)
 
-## 特徴
+A JavaScript interpreter written in JavaScript. Supports ES6+ syntax including async/await and provides an **expression-level step execution API** — step-in, step-over, step-out, and step-back.
 
-- **式単位のステップ実行** — 文単位ではなく、すべての AST ノードの評価を個別のステップとして扱います
-- **ステップバック（逆方向実行）** — 全評価ステップをスナップショット配列として記録するため、O(1) で過去の状態に戻れます
-- **プログラム的 API** — `JSDebugger` クラスを使えば、IDE・外部ツールへの組み込みが可能です
-- **対話型デバッガー** — CLI から直接ステップ実行できます
-- **ES6+ 対応** — アロー関数・クラス・分割代入・テンプレートリテラルなど主要な構文をサポート
+## Features
 
-## インストール
+- **Expression-level stepping** — every AST node evaluation is a separate step, not just statements
+- **Step-back (reverse execution)** — all evaluation events are recorded as a snapshot array, allowing O(1) reverse steps; deep-cloned environments accurately restore object and array mutations
+- **async/await support** — synchronous simulation lets you step through async code that doesn't involve real I/O
+- **Programmatic API** — embed `JSDebugger` into IDE integrations or external tools
+- **Interactive CLI debugger** — step through code directly in the terminal
+- **ES6+ syntax** — arrow functions, classes, destructuring, template literals, and more
+
+## Installation
 
 ```bash
 git clone https://github.com/tntetsu/JSInterpreter.git
@@ -20,16 +23,16 @@ cd JSInterpreter
 npm install
 ```
 
-## 使い方
+## Usage
 
-### REPL（対話型実行）
+### REPL (Interactive evaluation)
 
 ```bash
 node src/index.js
 ```
 
 ```
-JS インタープリター REPL  （終了: .exit または Ctrl+D）
+JS Interpreter REPL  (exit: .exit or Ctrl+D)
 > 1 + 2 * 3
 7
 > const greet = name => `Hello, ${name}!`
@@ -37,13 +40,13 @@ JS インタープリター REPL  （終了: .exit または Ctrl+D）
 "Hello, world!"
 ```
 
-### ファイル実行
+### File execution
 
 ```bash
 node src/index.js examples/fibonacci.js
 ```
 
-### 対話型デバッガー
+### Interactive debugger
 
 ```bash
 node src/index.js --debug examples/fibonacci.js
@@ -51,8 +54,8 @@ node src/index.js --debug examples/fibonacci.js
 
 ```
 ────────────────────────────────────────────────────────────
-JS デバッガー起動  コマンド: n=stepIn  v=stepOver  o=stepOut  b=stepBack
-                           p=変数表示  stack=スタック  c=continue  q=終了
+JS Debugger started  commands: n=stepIn  v=stepOver  o=stepOut  b=stepBack
+                               p=variables  stack=callstack  c=continue  q=quit
 ────────────────────────────────────────────────────────────
 [▶ enter] Program                   line 1:0  (depth=0, callDepth=0)
 (debug) > n
@@ -65,21 +68,21 @@ JS デバッガー起動  コマンド: n=stepIn  v=stepOver  o=stepOut  b=stepB
 [◀ exit ] BinaryExpression          line 5:10 → true  (depth=4, callDepth=1)
 ```
 
-#### デバッガーコマンド
+#### Debugger commands
 
-| コマンド | 操作 |
-|---------|------|
-| `n` または Enter | ステップイン（次のイベントへ） |
-| `v` | ステップオーバー（現在ノードをまとめてスキップ） |
-| `o` | ステップアウト（現在の関数から抜ける） |
-| `b` | ステップバック（1つ前へ戻る） |
-| `p` | 全変数を表示 |
-| `p <変数名>` | 指定変数を表示 |
-| `stack` | コールスタックを表示 |
-| `c` | 末尾まで実行（continue） |
-| `q` | 終了 |
+| Command | Action |
+|---------|--------|
+| `n` or Enter | Step-in (advance to next event) |
+| `v` | Step-over (skip current node's children) |
+| `o` | Step-out (exit current function) |
+| `b` | Step-back (go back one event) |
+| `p` | Print all variables |
+| `p <name>` | Print named variable |
+| `stack` | Print call stack |
+| `c` | Continue to end (or next breakpoint) |
+| `q` | Quit |
 
-## プログラム的 API
+## Programmatic API
 
 ```javascript
 const { JSDebugger } = require('./src/interpreter/debugger');
@@ -92,49 +95,49 @@ const dbg = new JSDebugger(`
   fib(5);
 `);
 
-// ステップイン
+// Step-in
 const { event, done } = dbg.stepIn();
 console.log(event.nodeType, event.phase, event.loc);
 
-// ステップオーバー（子ノードをまとめてスキップ）
+// Step-over (skip children of current node)
 dbg.stepOver();
 
-// ステップアウト（現在の関数を抜ける）
+// Step-out (exit current function)
 dbg.stepOut();
 
-// ステップバック（O(1) で1つ前へ）
+// Step-back (O(1), always)
 dbg.stepBack();
 
-// ブレークポイント実行
+// Run to breakpoint
 dbg.continue([{ line: 3 }]);
 
-// 現在の変数を取得
+// Inspect variables
 const vars = dbg.getVariables('all');
 
-// コールスタックを取得
+// Inspect call stack
 const stack = dbg.getCallStack();
 ```
 
-### TraceEvent の構造
+### TraceEvent structure
 
-各ステップは以下の情報を持ちます。
+Each step carries:
 
 ```javascript
 {
-  phase:     'enter' | 'exit',  // 評価開始 or 評価完了
+  phase:     'enter' | 'exit',  // evaluation start or completion
   nodeType:  'BinaryExpression',
   loc:       { line: 3, column: 5 },
-  depth:     2,                 // AST ネスト深さ
-  callDepth: 1,                 // 関数呼び出し深さ
+  depth:     2,                 // AST nesting depth
+  callDepth: 1,                 // function call depth
   callStack: [{ name: 'fib', loc: { line: 6, column: 0 } }],
-  env:       [{ n: 5 }, { fib: [Function] }],  // スコープチェーンのスナップショット
-  value:     6,                 // phase === 'exit' のときの評価結果
+  env:       [{ n: 5 }, { fib: [Function] }],  // deep-cloned scope chain snapshot
+  value:     6,                 // evaluation result (exit events only)
 }
 ```
 
-### ステップ実行の例
+### Step-by-step example
 
-`let x = 1 + 2 * 3;` は以下の 12 ステップに分解されます。
+`let x = 1 + 2 * 3;` decomposes into 12 steps:
 
 | cursor | phase | nodeType | value |
 |--------|-------|----------|-------|
@@ -151,90 +154,96 @@ const stack = dbg.getCallStack();
 | 10 | exit | BinaryExpression(+) | `7` |
 | 11 | exit | VariableDeclaration | — |
 
-## 対応構文
+## Supported Syntax
 
-| カテゴリ | 構文 |
-|---------|------|
-| 変数 | `let` `const` `var`、分割代入（オブジェクト・配列）、デフォルト値 |
-| 関数 | 関数宣言・式・アロー関数、レスト引数、デフォルト引数、クロージャ、再帰 |
-| 制御フロー | `if/else`、`while`、`do...while`、`for`、`for...of`、`for...in`、`break/continue`、`return` |
-| 例外 | `throw`、`try/catch/finally` |
-| クラス | `class`、`constructor`、継承（`extends/super`）、`static`、ゲッター・セッター |
-| 演算子 | 算術・比較・論理・ビット・代入・三項・`typeof`・`instanceof`・`in`・`??`・`?.` |
-| リテラル | 数値（16進・8進・2進・セパレーター）、テンプレートリテラル（ネスト補間）、`null`・`true`・`false` |
-| その他 | スプレッド/レスト（`...`）、短縮プロパティ、計算プロパティ名 |
+| Category | Syntax |
+|----------|--------|
+| Variables | `let` `const` `var`, destructuring (object/array), default values |
+| Functions | Declarations, expressions, arrow functions, **async functions**, rest params, default params, closures, recursion |
+| Async | `async function`, `async () =>`, `await`, `Promise.resolve/reject/all/allSettled/race/any`, `new Promise(executor)` |
+| Control flow | `if/else`, `while`, `do...while`, `for`, `for...of`, `for...in`, `break/continue`, `return` |
+| Exceptions | `throw`, `try/catch/finally` |
+| Classes | `class`, `constructor`, inheritance (`extends/super`), `static`, getters/setters |
+| Operators | Arithmetic, comparison, logical, bitwise, assignment, ternary, `typeof`, `instanceof`, `in`, `??`, `?.` |
+| Literals | Numbers (hex/octal/binary/separator), template literals (nested interpolation), `null`/`true`/`false` |
+| Other | Spread/rest (`...`), shorthand properties, computed property names |
 
-## アーキテクチャ
+## Architecture
 
 ```
 source
   │
   ▼
-Lexer          ソーステキスト → Token[]
+Lexer          source text → Token[]
   │            (src/lexer/lexer.js)
   ▼
-Parser         Token[] → AST（各ノードに loc 付き）
+Parser         Token[] → AST (nodes include loc)
   │            (src/parser/parser.js)
   ▼
-evaluate()     AST → ランタイム値 ＋ Recorder へ全イベントを記録
+evaluate()     AST → runtime values + records all events in Recorder
   │            (src/interpreter/interpreter.js)
   ▼
-JSDebugger     trace[] のインデックス操作でステップ制御
+JSDebugger     step control via index manipulation on trace[]
                (src/interpreter/debugger.js)
 ```
 
-実行は2フェーズに分かれます。
+Execution is split into two phases:
 
-1. **記録フェーズ** — コンストラクターでプログラムを最後まで実行し、全評価イベントを `trace` 配列に保存
-2. **ナビゲーションフェーズ** — `stepIn/stepOver/stepOut/stepBack` は `trace[cursor]` のインデックス操作に還元される（再実行なし）
+1. **Recording phase** — the constructor runs the entire program and stores every evaluation event in a `trace` array
+2. **Navigation phase** — `stepIn/stepOver/stepOut/stepBack` reduce to pure index operations on `trace[cursor]` (no re-execution)
 
-## 開発
+## Development
 
 ```bash
-# 全テストを実行
+# Run all tests
 npm test
 
-# 単一テストファイル
+# Run a single test file
 npx jest src/interpreter/debugger.test.js
 
-# ウォッチモード
+# Watch mode
 npm run test:watch
 ```
 
-テストは 4 ファイル・170 件です。
+173 tests across 4 files.
 
-## 既知の制限・未実装機能
+## Known Limitations
 
-### デバッガー固有の制限
+### Debugger-specific
 
-| 制約 | 内容 |
-|------|------|
-| 無限ループ | プログラムが終了しない場合、記録フェーズが止まらない。`options.maxSteps`（デフォルト: 100,000 ステップ）で上限設定可 |
-| ステップバックの精度 | オブジェクト・配列はディープクローンで記録されるため内部変更も正確に再現される。ただし `Map`・`Set`・`Error` 等のネイティブオブジェクトは参照保持のため変更履歴が不正確になる場合がある |
+| Constraint | Detail |
+|-----------|--------|
+| Infinite loops | The recording phase does not terminate. Use `options.maxSteps` (default: 100,000) to cap execution. |
+| Step-back accuracy | Plain objects and arrays are deep-cloned, so mutations are accurately restored. However, native objects (`Map`, `Set`, `Error` instances, etc.) are stored by reference, so their mutation history may be inaccurate. |
 
-### 未対応の構文
+### Unsupported syntax
 
-| 構文 | 状況 | 回避策 |
-|------|------|--------|
-| 正規表現リテラル | `/pattern/` 構文は字句解析エラー | `new RegExp('pattern')` は使用可 |
-| `switch` 文 | 未実装 | `if/else if` で代替 |
-| ラベル付き文 | `label:` 構文は未実装 | — |
-| `with` 文 | 未実装（非推奨構文） | — |
-| `function*` / `yield` | ジェネレーター構文は解析できるが実行不可 | — |
-| タグ付きテンプレートリテラル | `` tag`...` `` は未実装 | 通常のテンプレートリテラルは使用可 |
-| `for await...of` | 未実装 | — |
+| Syntax | Status | Workaround |
+|--------|--------|------------|
+| Regex literals | `/pattern/` causes a lex error | `new RegExp('pattern')` works |
+| `switch` statement | Not implemented | Use `if/else if` |
+| Labeled statements | Not implemented | — |
+| `with` statement | Not implemented (deprecated) | — |
+| `function*` / `yield` | Parseable but not executable | — |
+| Tagged template literals | Not implemented | Plain template literals work |
+| `for await...of` | Not implemented | — |
 
-### ランタイムの制限
+### Runtime limitations
 
-| 制限 | 内容 |
-|------|------|
-| ネイティブ async I/O | `async/await` は同期的にシミュレーションするため、`fetch`・`setTimeout` など本物の非同期 I/O は動作しない |
-| ネイティブメソッドへの JSFunction 渡し | `[1,2,3].map(x => x*2)` のような、ネイティブ配列/オブジェクトメソッドにインタープリター内関数を渡す呼び出しは動作しない（コールバックが JSFunction オブジェクトになるため） |
-| `arguments` オブジェクト | 関数内の `arguments` は未定義。レスト引数（`...args`）で代替 |
-| オブジェクトのゲッター・セッター | `get`/`set` をネイティブオブジェクトメソッドとして呼び出す場合に制限あり |
-| `WeakRef` / `Proxy` / `Reflect` | グローバルに未登録（必要に応じて追加可能） |
-| モジュール | `import/export` は構文解析のみ（ファイル読み込み・モジュール解決は行わない） |
+| Limitation | Detail |
+|-----------|--------|
+| Native async I/O | `async/await` is simulated synchronously; `fetch`, `setTimeout`, etc. do not work |
+| JSFunction as native callback | `[1,2,3].map(x => x*2)` does not work — native methods receive a JSFunction object, not a callable |
+| `arguments` object | Not supported inside functions; use rest parameters (`...args`) instead |
+| `WeakRef` / `Proxy` / `Reflect` | Not registered as globals (can be added if needed) |
+| Module system | `import/export` is parse-only; no file loading or module resolution |
 
-## ライセンス
+## Documentation
 
-MIT
+- [Functional Specification](docs/functional-specification.md)
+- [Detailed Design](docs/detailed-design.md)
+
+## License
+
+MIT  
+Copyright (c) 2026 tanaka. Portions generated with AI assistance.

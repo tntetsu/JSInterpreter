@@ -1,143 +1,162 @@
-# 機能仕様書
+# Functional Specification
 
-**プロジェクト名**: JSInterpreter  
-**バージョン**: 1.0.0  
-**作成日**: 2026-05-24  
-**対象読者**: プロダクトオーナー・開発者・テスター
+**Project**: JSInterpreter  
+**Version**: 1.1.0  
+**Created**: 2026-05-24  
+**Updated**: 2026-05-24  
+**Audience**: Product owners, developers, testers
+
+> 🌐 [日本語版](functional-specification.ja.md)
 
 ---
 
-## 1. 概要
+## 1. Overview
 
-JSInterpreter は JavaScript で書かれた JavaScript インタープリターである。  
-モダンな ES6+ 構文を実行し、**式単位のステップ実行 API**（ステップイン・ステップアウト・ステップオーバー・ステップバック）を提供することを主目的とする。
+JSInterpreter is a JavaScript interpreter written in JavaScript. Its primary goal is to execute modern ES6+ syntax (including async/await) and provide an **expression-level step-execution API** — step-in, step-over, step-out, and step-back.
 
-### 1.1 背景と目的
+### 1.1 Background and Purpose
 
-通常のデバッガーはバイトコードや JIT コンパイル済みコードを対象とするため、JavaScript の評価プロセスを式レベルで可視化することが難しい。  
-本システムはソースコードを AST として解釈し、**全評価ステップをスナップショット配列として記録**することで、任意の粒度でのステップ実行・逆方向実行（ステップバック）を実現する。
+Conventional debuggers target bytecode or JIT-compiled code, making it difficult to visualize the JavaScript evaluation process at the expression level. This system interprets source code as an AST and **records every evaluation step as a snapshot array**, enabling step execution and reverse execution (step-back) at arbitrary granularity.
 
-### 1.2 システムの位置づけ
+### 1.2 System Position
 
 ```
-ユーザー（開発者・学習者）
+User (developer / learner)
     │
-    ├─── プログラム的 API（JSDebugger クラス）
-    │        ↑ 外部ツール・テストコード・IDE 統合
+    ├─── Programmatic API (JSDebugger class)
+    │        ↑ External tools · test code · IDE integration
     │
-    └─── 対話型 REPL デバッガー（CLI）
-             ↑ ターミナルから直接操作
+    └─── Interactive REPL Debugger (CLI)
+             ↑ Operated directly from the terminal
 ```
 
 ---
 
-## 2. 機能一覧
+## 2. Feature List
 
-| 機能 ID | 機能名 | 優先度 |
-|---------|--------|--------|
-| F-01 | JavaScript ソースコードの実行 | 必須 |
-| F-02 | ステップイン | 必須 |
-| F-03 | ステップオーバー | 必須 |
-| F-04 | ステップアウト | 必須 |
-| F-05 | ステップバック | 必須 |
-| F-06 | 変数の参照 | 必須 |
-| F-07 | コールスタックの参照 | 必須 |
-| F-08 | ブレークポイント実行 | 必須 |
-| F-09 | 対話型 REPL デバッガー | 必須 |
-| F-10 | ファイル実行モード | 必須 |
-| F-11 | 通常 REPL（非デバッグ） | 必須 |
+| ID   | Feature | Priority |
+|------|---------|----------|
+| F-01 | Execute JavaScript source code | Required |
+| F-02 | Step-in | Required |
+| F-03 | Step-over | Required |
+| F-04 | Step-out | Required |
+| F-05 | Step-back | Required |
+| F-06 | Variable inspection | Required |
+| F-07 | Call-stack inspection | Required |
+| F-08 | Breakpoint execution | Required |
+| F-09 | Interactive REPL debugger | Required |
+| F-10 | File execution mode | Required |
+| F-11 | Plain REPL (non-debug) | Required |
 
 ---
 
-## 3. 対応する JavaScript 構文
+## 3. Supported JavaScript Syntax
 
-### 3.1 変数宣言
+### 3.1 Variable Declarations
 
-- `let`、`const`、`var` による変数宣言
-- 複数同時宣言（`let a = 1, b = 2`）
-- オブジェクト分割代入（`let { x, y } = obj`）
-- 配列分割代入（`let [a, b] = arr`）
-- デフォルト値付き分割代入（`let { x = 0 } = obj`）
+- `let`, `const`, `var`
+- Multiple declarations (`let a = 1, b = 2`)
+- Object destructuring (`let { x, y } = obj`)
+- Array destructuring (`let [a, b] = arr`)
+- Default values in destructuring (`let { x = 0 } = obj`)
 
-### 3.2 式
+### 3.2 Expressions
 
-| 分類 | 内容 |
-|------|------|
-| リテラル | 数値（整数・浮動小数点・16進・8進・2進・数値セパレーター）、文字列（エスケープ対応）、真偽値、null |
-| テンプレートリテラル | バッククォート文字列、`${式}` による補間（ネスト可） |
-| 算術演算 | `+` `-` `*` `/` `%` `**` |
-| 比較演算 | `==` `!=` `===` `!==` `<` `>` `<=` `>=` |
-| 論理演算 | `&&` `\|\|` `!` `??`（null 合体） |
-| ビット演算 | `&` `\|` `^` `~` `<<` `>>` `>>>` |
-| 代入演算 | `=` `+=` `-=` `*=` `/=` `%=` `**=` `&&=` `\|\|=` `??=` |
-| インクリメント | `++` `--`（前置・後置） |
-| 三項演算子 | `条件 ? 真値 : 偽値` |
-| typeof / void / delete | 単項演算子 |
-| instanceof / in | 二項演算子 |
-| オプショナルチェーン | `?.`（オプショナルアクセス・呼び出し） |
-| スプレッド / レスト | `...` |
+| Category | Content |
+|----------|---------|
+| Literals | Numbers (integer, float, hex, octal, binary, numeric separators), strings (escape sequences), booleans, null |
+| Template literals | Backtick strings, `${expr}` interpolation (nestable) |
+| Arithmetic | `+` `-` `*` `/` `%` `**` |
+| Comparison | `==` `!=` `===` `!==` `<` `>` `<=` `>=` |
+| Logical | `&&` `\|\|` `!` `??` (nullish coalescing) |
+| Bitwise | `&` `\|` `^` `~` `<<` `>>` `>>>` |
+| Assignment | `=` `+=` `-=` `*=` `/=` `%=` `**=` `&&=` `\|\|=` `??=` |
+| Increment | `++` `--` (prefix and postfix) |
+| Ternary | `condition ? truthy : falsy` |
+| Unary | `typeof`, `void`, `delete` |
+| Binary | `instanceof`, `in` |
+| Optional chaining | `?.` (optional access and call) |
+| Spread / Rest | `...` |
+| Await | `await expr` (inside async functions) |
 
-### 3.3 関数
+### 3.3 Functions
 
-- 関数宣言（`function f(a, b) { ... }`）
-- 関数式（`const f = function() { ... }`）
-- アロー関数（`x => x * 2`、`(a, b) => a + b`、ブロック本体）
-- レスト引数（`...args`）
-- デフォルト引数（`x = 0`）
-- クロージャ（定義時のスコープをキャプチャ）
-- 再帰呼び出し
+- Function declarations (`function f(a, b) { ... }`)
+- Function expressions (`const f = function() { ... }`)
+- Arrow functions (`x => x * 2`, `(a, b) => a + b`, block body)
+- **Async functions** (`async function f() { ... }`, `async () => ...`, `async x => ...`)
+- Rest parameters (`...args`)
+- Default parameters (`x = 0`)
+- Closures (captures the scope at definition time)
+- Recursive calls
 
-### 3.4 制御フロー
+### 3.4 Control Flow
 
 - `if` / `else if` / `else`
-- `while` ループ
-- `do...while` ループ
-- `for` ループ（初期化・条件・更新）
-- `for...of` ループ（イテラブル対象）
-- `for...in` ループ（列挙可能プロパティ）
+- `while` loop
+- `do...while` loop
+- `for` loop (init, test, update)
+- `for...of` (iterables)
+- `for...in` (enumerable properties)
 - `break` / `continue`
-- `return`（値あり・なし）
+- `return` (with or without value)
 - `throw` / `try` / `catch` / `finally`
 
-### 3.5 クラス
+### 3.5 Classes
 
-- `class` 宣言・式
+- `class` declarations and expressions
 - `constructor`
-- メソッド定義
-- `extends`（継承）・`super`
-- `new` による インスタンス生成
-- 静的メソッド（`static`）
-- ゲッター・セッター（`get` / `set`）
+- Method definitions (regular and async)
+- `extends` (inheritance) and `super`
+- `new` expressions
+- Static methods (`static`)
+- Getters and setters (`get` / `set`)
 
-### 3.6 オブジェクト・配列
+### 3.6 Objects and Arrays
 
-- オブジェクトリテラル（`{ key: value }`）
-- 短縮プロパティ（`{ x }`）
-- 計算プロパティ名（`{ [expr]: value }`）
-- スプレッド（`{ ...obj }`）
-- 配列リテラル（`[1, 2, 3]`）
-- スプレッド（`[...arr]`）
-- プロパティアクセス（`obj.key`、`obj[expr]`）
+- Object literals (`{ key: value }`)
+- Shorthand properties (`{ x }`)
+- Computed property names (`{ [expr]: value }`)
+- Spread (`{ ...obj }`)
+- Array literals (`[1, 2, 3]`)
+- Spread (`[...arr]`)
+- Property access (`obj.key`, `obj[expr]`)
 
-### 3.7 その他
+### 3.7 async/await (Synchronous Simulation)
 
-- `import` / `export`（構文解析のみ、ランタイム実行なし）
-- `debugger` 文（無視）
-- 行コメント（`//`）・ブロックコメント（`/* */`）
-- 自動セミコロン挿入（ASI）のサポート
+async/await is simulated synchronously. Code that does not involve native I/O is fully supported.
+
+| Syntax | Behavior |
+|--------|---------|
+| `async function f() { ... }` | Call result returned as a `JSPromise` object |
+| `async () => expr` | Same as above |
+| `await expr` | Synchronously resolves a `JSPromise` and returns its value |
+| `Promise.resolve(val)` | Returns an immediately fulfilled `JSPromise` |
+| `Promise.reject(reason)` | Returns an immediately rejected `JSPromise` |
+| `Promise.all/allSettled/race/any([...])` | Synchronously resolved results |
+| `new Promise((resolve, reject) => { ... })` | Runs executor synchronously, returns `JSPromise` |
+
+**Limitation**: Does not work with real async I/O such as `fetch` or `setTimeout`.
+
+### 3.8 Other
+
+- `import` / `export` (parsed only; no runtime module loading)
+- `debugger` statement (ignored)
+- Line comments (`//`) and block comments (`/* */`)
+- Automatic Semicolon Insertion (ASI)
 
 ---
 
-## 4. ステップ実行機能（F-02 〜 F-05）
+## 4. Step Execution (F-02 – F-05)
 
-### 4.1 実行粒度
+### 4.1 Granularity
 
-本システムのステップ実行は**式（ノード）単位**である。すべての AST ノードの評価開始（enter）と評価完了（exit）を個別のステップとして扱う。
+Step execution operates at the **expression (node) level**. Each AST node produces an `enter` event (evaluation starts) and an `exit` event (evaluation completes).
 
-#### 例：`let x = 1 + 2 * 3;` のステップ列
+#### Example: steps for `let x = 1 + 2 * 3;`
 
-| ステップ | フェーズ | ノード型 | 値 |
-|---------|---------|---------|-----|
+| Step | Phase | Node type | Value |
+|------|-------|-----------|-------|
 | 0 | enter | VariableDeclaration | — |
 | 1 | enter | BinaryExpression(+) | — |
 | 2 | enter | Literal | — |
@@ -151,136 +170,154 @@ JSInterpreter は JavaScript で書かれた JavaScript インタープリター
 | 10 | exit | BinaryExpression(+) | `7` |
 | 11 | exit | VariableDeclaration | — |
 
-### 4.2 ステップイン（F-02）
+### 4.2 Step-in (F-02)
 
-**操作**: 次のイベントへ1つ進む。  
-**関数呼び出し**: 呼び出し先の内部に入る。  
-**フェーズ**: enter・exit を問わず次へ。  
-**境界**: 最終イベントでは停止（done = true）。
+**Action**: Advance one event.  
+**Function calls**: Enters the body of the callee.  
+**Phase**: Advances regardless of enter/exit.  
+**Boundary**: Stops at the last event (`done = true`).
 
-### 4.3 ステップオーバー（F-03）
+### 4.3 Step-over (F-03)
 
-**操作**: 現在ノードの評価をまとめてスキップし、exit に着地する。  
-**詳細**:
-- 現在が `enter(N)` → 対応する `exit(N)` へジャンプ（Nの子ノードは実行済みで値が確定）
-- 現在が `exit` → cursor を1つ進める（ステップインと同じ）
+**Action**: Skip the current node's children and land on its exit event.  
+- Current is `enter(N)` → jump to matching `exit(N)` (children already evaluated)  
+- Current is `exit` → advance one step (same as step-in)
 
-**利用例**: 関数呼び出しの `enter(CallExpression)` でステップオーバーすると、関数の中身を飛ばして `exit(CallExpression)` に着地し、戻り値を確認できる。
+**Example**: Stepping over `enter(CallExpression)` skips the function body and lands on `exit(CallExpression)`, where the return value is available.
 
-### 4.4 ステップアウト（F-04）
+### 4.4 Step-out (F-04)
 
-**操作**: 現在の関数呼び出しを抜け、呼び出し元へ戻る。  
-**詳細**:
-- 関数呼び出し深さ（callDepth）が現在より小さくなる最初の `exit` イベントへジャンプ
-- callDepth が 0（トップレベル）の場合はプログラム末尾へ
+**Action**: Exit the current function call and return to the caller.  
+- Jump to the first `exit` event where `callDepth` drops below the current level  
+- If `callDepth === 0` (top level), jump to the end of the program
 
-**利用例**: 関数の途中でステップアウトすると、その関数の `exit(CallExpression)` に着地し、呼び出し元のコンテキストへ戻る。
+### 4.5 Step-back (F-05)
 
-### 4.5 ステップバック（F-05）
-
-**操作**: 1つ前のイベントへ戻る。  
-**特性**: 常に O(1)。スナップショット配列方式のため再実行は不要。  
-**境界**: 最初のイベント（cursor = 0）では no-op。  
-**制約**: オブジェクト値のスナップショットはシャロークローンのため、オブジェクト内部の変更は履歴に反映されない場合がある（既知の制限）。
+**Action**: Go back one event. Always O(1).  
+**Accuracy**: Environment snapshots are deep-cloned, so mutations inside objects and arrays are accurately restored.  
+**Boundary**: No-op when `cursor === 0`.  
+**Caveat**: Native objects (`Map`, `Set`, `Error` instances, etc.) are stored by reference, so their mutation history may be inaccurate.
 
 ---
 
-## 5. 状態参照機能
+## 5. State Inspection (F-06 – F-08)
 
-### 5.1 変数参照（F-06）
+### 5.1 Variable Inspection (F-06)
 
-現在のステップにおける変数の値を取得する。
+| Option | Description |
+|--------|-------------|
+| `'local'` | Innermost scope only |
+| `'all'`   | Full scope chain, flattened (outer variables included) |
 
-| オプション | 説明 |
-|----------|------|
-| `'local'` | 最内スコープ（現在の関数ローカル変数）のみ |
-| `'all'` | スコープチェーン全体をフラット化（外側スコープの変数も含む） |
+### 5.2 Call-Stack Inspection (F-07)
 
-各ステップの変数状態はスナップショットとして記録済みのため、即座に参照できる。
+Returns the call stack at the current step. Each frame contains:
+- Function name (`<anonymous>` or `<arrow>` for unnamed functions)
+- Call site (line number, column number)
 
-### 5.2 コールスタック参照（F-07）
+### 5.3 Breakpoint Execution (F-08)
 
-現在のステップにおける関数呼び出し履歴を返す。各フレームは以下の情報を持つ。
-
-- 関数名（匿名の場合は `<anonymous>` または `<arrow>`）
-- 呼び出し位置（行番号・列番号）
-
-### 5.3 ブレークポイント実行（F-08）
-
-指定した行番号（・任意で列番号）の `enter` イベントまで一気に実行する。  
-ブレークポイントを指定しない場合はプログラム末尾まで実行する。
+Runs until the first `enter` event matching the specified line (and optional column). Without breakpoints, runs to the end of the program.
 
 ---
 
-## 6. 実行モード（F-09〜F-11）
+## 6. Execution Modes (F-09 – F-11)
 
-### 6.1 対話型デバッガー（F-09）
+### 6.1 Interactive Debugger (F-09)
 
 ```
-起動: node src/index.js --debug <file.js>
+Launch: node src/index.js --debug <file.js>
 ```
 
-| コマンド | 操作 |
-|---------|------|
-| `n` または Enter | ステップイン |
-| `v` | ステップオーバー |
-| `o` | ステップアウト |
-| `b` | ステップバック |
-| `p` | 全変数を表示 |
-| `p <変数名>` | 指定変数を表示 |
-| `stack` | コールスタックを表示 |
-| `c` | 末尾まで実行（continue） |
-| `q` | 終了 |
+| Command | Action |
+|---------|--------|
+| `n` or Enter | Step-in |
+| `v` | Step-over |
+| `o` | Step-out |
+| `b` | Step-back |
+| `p` | Print all variables |
+| `p <name>` | Print named variable |
+| `stack` | Print call stack |
+| `c` | Continue to end (or next breakpoint) |
+| `q` | Quit |
 
-表示形式（例）:
+Display format:
 ```
 [▶ enter] BinaryExpression        line 3:5   (depth=2, callDepth=0)
 [◀ exit ] BinaryExpression        line 3:5 → 7  (depth=2, callDepth=0)
 ```
 
-### 6.2 ファイル実行モード（F-10）
+### 6.2 File Execution Mode (F-10)
 
 ```
-起動: node src/index.js <file.js>
+Launch: node src/index.js <file.js>
 ```
 
-JavaScript ファイルをデバッグなしで実行する。`console.log` などの出力は標準出力へ。エラー発生時はスタックトレースなしのメッセージを標準エラーへ出力する。
+Executes a JavaScript file without debugging. Output from `console.log` goes to stdout. Errors are printed to stderr without a stack trace.
 
-### 6.3 通常 REPL（F-11）
+### 6.3 Plain REPL (F-11)
 
 ```
-起動: node src/index.js
+Launch: node src/index.js
 ```
 
-セッション内で環境を維持しながら式・文を対話的に実行する。入力された式の評価結果を表示する。`.exit` またはCtrl+D で終了。
+Interactively evaluates expressions and statements, maintaining environment state across inputs. Exit with `.exit` or Ctrl+D.
 
 ---
 
-## 7. エラー処理
+## 7. Error Handling
 
-| エラー種別 | 発生タイミング | メッセージ形式 |
-|-----------|--------------|--------------|
-| `LexError` | 字句解析時 | `[Lexer] 行:列: メッセージ` |
-| `ParseError` | 構文解析時 | `[Parser] 行:列: メッセージ` |
-| `RuntimeError` | 評価時 | `[Runtime] 行:列: メッセージ` |
+| Error type | Trigger | Message format |
+|-----------|---------|----------------|
+| `LexError` | Lexing | `[Lexer] line:col: message` |
+| `ParseError` | Parsing | `[Parser] line:col: message` |
+| `RuntimeError` | Evaluation | `[Runtime] line:col: message` |
 
-いずれも**スタックトレースなし**の人間可読メッセージとして出力する。
-
----
-
-## 8. 制約・既知の制限
-
-| 制約 | 内容 |
-|------|------|
-| 無限ループ | プログラムが終了しない場合、記録フェーズが終わらない。`maxSteps` オプションで上限を設定可能（デフォルト: 100,000 ステップ） |
-| ステップバックの精度 | オブジェクト・配列値はシャロークローンのため、内部変更の履歴が不正確になる場合がある |
-| 正規表現リテラル | 構文解析・実行非対応（`RegExp` コンストラクタは使用可） |
-| async/await | 構文は解析できるが、ランタイムの非同期実行は未対応 |
-| import/export | 構文解析のみ（モジュールのロードは行わない） |
-| モジュールシステム | CommonJS / ESM のモジュール解決は未対応 |
+All errors are printed as human-readable messages **without** a stack trace.
 
 ---
 
-## 9. テスト要件
+## 8. Constraints and Known Limitations
 
-全機能はユニットテストでカバーする。テストファイルはソースファイルと同じディレクトリに配置する（コロケーション）。スナップショットテストは使用せず、明示的な `expect(result).toBe(...)` 形式で記述する。
+### Debugger-Specific
+
+| Constraint | Detail |
+|-----------|--------|
+| Infinite loops | Recording phase does not terminate. Use `maxSteps` option (default: 100,000) to cap. |
+| Step-back accuracy | Native objects (`Map`, `Set`, etc.) are stored by reference; their mutation history may be inaccurate. |
+
+### Unsupported Syntax
+
+| Syntax | Status |
+|--------|--------|
+| Regular expression literals | `/pattern/` causes a lex error (`RegExp` constructor works) |
+| `switch` statement | Not implemented |
+| Labeled statements | Not implemented |
+| `with` statement | Not implemented (deprecated syntax) |
+| `function*` / `yield` | Parsed but not executable |
+| Tagged template literals | Not implemented |
+| `for await...of` | Not implemented |
+
+### Runtime Limitations
+
+| Limitation | Detail |
+|-----------|--------|
+| Native async I/O | `fetch`, `setTimeout`, etc. do not work |
+| JSFunction as native callback | `[1,2,3].map(x => x*2)` does not work |
+| `arguments` object | Not supported; use rest parameters (`...args`) |
+| Module system | `import/export` is parse-only; no file loading |
+
+---
+
+## 9. Test Requirements
+
+All features are covered by unit tests. Test files are co-located with their source files. Explicit `expect(result).toBe(...)` assertions are used; snapshot tests are not.
+
+**Test breakdown (173 total):**
+
+| File | Count |
+|------|-------|
+| `src/lexer/lexer.test.js` | 45 |
+| `src/parser/parser.test.js` | 42 |
+| `src/interpreter/interpreter.test.js` | 50 |
+| `src/interpreter/debugger.test.js` | 36 |
