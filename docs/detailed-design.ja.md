@@ -762,7 +762,84 @@ getVariables(scope):
     return result
 ```
 
-### 7.5 continue のブレークポイント照合
+### 7.5 ヒューマンフレンドリーステップ（F-12）
+
+#### _getHumanIndices() — 事前計算
+
+初回呼び出し時に 1 パスで計算し、`Set<number>` として `this._humanIndices` にキャッシュする。計算量 O(n)。
+
+```
+インデックス i のイベントごとに:
+
+  ① ALWAYS_EXIT ノード型（VariableDeclaration, AssignmentExpression,
+     UpdateExpression, ReturnStatement, ThrowStatement）:
+       phase === 'exit' なら i を set に追加
+
+  ② CallExpression — ユーザー定義関数のみ:
+       open な CallExpression enter をスタックで管理。
+       スタック先頭の baseCallDepth より ev.callDepth が大きければ
+       hasDeeper = true にマーク。
+       exit 時: hasDeeper === true なら i を set に追加。
+       （ネイティブ関数は callDepth が増えないためスキップ）
+
+  ③ IfStatement / ConditionalExpression の条件テスト（1回）:
+       enter 時: trace[i+1].matchIdx を set に追加
+       （trace[i+1] = テスト式の enter、matchIdx = テスト式の exit）
+
+  ④ WhileStatement / DoWhileStatement の条件テスト（毎イテレーション）:
+       enter 時: i+1 から matchIdx まで走査。
+       depth+1 かつ nodeType !== 'BlockStatement' の exit をすべて追加。
+
+  ⑤ ForStatement のテスト式（毎イテレーション）:
+       enter 時: i+1 から matchIdx まで走査。
+       depth+1 かつ nodeType ∉ {'VariableDeclaration', 'BlockStatement'} の
+       exit をすべて追加。
+```
+
+#### humanStep()
+
+```
+humanSet = _getHumanIndices()
+for i = cursor+1 to trace.length-1:
+  if humanSet.has(i): cursor = i; return
+cursor = trace.length   // 残りに human イベントがない → done
+```
+
+#### humanStepBack()
+
+```
+humanSet = _getHumanIndices()
+for i = cursor-1 downto 0:
+  if humanSet.has(i): cursor = i; return
+// 見つからなければ no-op（cursor 変化なし）
+```
+
+どちらも最悪 O(n)。human イベントが密な実用プログラムでは平均 O(1) に近い。
+
+#### getSourceLine(line)
+
+`this.source` を `'\n'` で分割（初回のみ、`this._sourceLines` にキャッシュ）し、`_sourceLines[line - 1]` を trim して返す。CLI の `showHuman()` で使用。
+
+#### CLI 表示（showHuman）
+
+```
+[ラベル] line NNN  <ソース行（45文字パディング）>  →  値
+```
+
+| ラベル | 対象 |
+|--------|------|
+| `宣言` | VariableDeclaration |
+| `代入` | AssignmentExpression |
+| `更新` | UpdateExpression |
+| `return` | ReturnStatement |
+| `throw` | ThrowStatement |
+| `呼出` | CallExpression（ユーザー定義関数） |
+| `条件` | 条件式 exit |
+
+値の表示: `AssignmentExpression`・`UpdateExpression`・`CallExpression`・条件式のみ。  
+`VariableDeclaration`・`ReturnStatement`・`ThrowStatement` は値を非表示（ソース行が自明なため）。
+
+### 7.7 continue のブレークポイント照合
 
 ```
 for i = cursor+1 to trace.length-1:
@@ -842,9 +919,9 @@ if (val && val.__type__ === 'JSPromise') {
 | `src/lexer/lexer.test.js` | Lexer | 45 |
 | `src/parser/parser.test.js` | Parser | 42 |
 | `src/interpreter/interpreter.test.js` | Interpreter・Recorder | 50 |
-| `src/interpreter/debugger.test.js` | JSDebugger | 36 |
+| `src/interpreter/debugger.test.js` | JSDebugger | 48 |
 
-**合計: 173テスト**
+**合計: 185テスト**
 
 ### 9.2 デバッガーテストの方針
 
@@ -860,6 +937,11 @@ if (val && val.__type__ === 'JSPromise') {
 | getCallStack | トップレベルでは空、ネスト関数でフレームが積まれる |
 | continue | ブレークポイントなしで末尾まで、行指定で正確に停止 |
 | async/await | async 関数の JSPromise 返却、await による同期解決 |
+| humanStep | VariableDeclaration/AssignmentExpression/UpdateExpression が対象、Literal/Identifier/BinaryExpression はスキップ |
+| humanStep（条件） | if/while/for の条件 exit が true/false の値とともに捕捉、ループの全イテレーション対象 |
+| humanStep（呼び出し） | ユーザー定義 CallExpression は対象、ネイティブ関数（Math.floor 等）はスキップ |
+| humanStepBack | 直前の human イベントへ戻る、cursor=0 では no-op |
+| getSourceLine | 指定行番号のソーステキストが返る |
 
 ---
 

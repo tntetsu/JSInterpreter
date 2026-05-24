@@ -49,6 +49,7 @@ JSInterpreter は JavaScript で書かれた JavaScript インタープリター
 | F-09 | 対話型 REPL デバッガー | 必須 |
 | F-10 | ファイル実行モード | 必須 |
 | F-11 | 通常 REPL（非デバッグ） | 必須 |
+| F-12 | ヒューマンフレンドリーステップ | 必須 |
 
 ---
 
@@ -217,6 +218,69 @@ async/await を同期的にシミュレーションする。ネイティブ I/O 
 
 ---
 
+## 5a. ヒューマンフレンドリーステップ（F-12）
+
+### 5a.1 目的
+
+式単位のステップ実行（F-02〜F-05）はすべての AST ノード評価を個別のイベントとして扱うため、`let x = 1 + 2 * 3` 1行だけで 12 イベントが発生する。これはデバッガーとして正確だが、人間がアルゴリズムをノートに追跡するには情報過多になる。
+
+F-12 は**「意味のある変化点」単位**のステップを提供する。人間が手でトレースするときに書き留める情報だけを表示する粒度である。
+
+### 5a.2 対象イベント
+
+以下のノード型の `exit` フェーズイベントのみを対象とする:
+
+| ラベル | ノード型 | 説明 |
+|--------|---------|------|
+| 宣言 | `VariableDeclaration` | `let`/`const`/`var` 宣言の完了 |
+| 代入 | `AssignmentExpression` | 代入・複合代入の完了 |
+| 更新 | `UpdateExpression` | `i++`、`--j` など |
+| return | `ReturnStatement` | `return` の実行 |
+| throw | `ThrowStatement` | `throw` の実行 |
+| 呼出 | `CallExpression` | **ユーザー定義関数**の呼び出し完了（`callDepth` 増加で検出） |
+| 条件 | 条件式 | `if`・`while`・`do...while`・`for`・`? :` の `true`/`false` 決定点 |
+
+**ネイティブ関数**（`Math.floor()`・`arr.push()` など）は `callDepth` を増加させないためスキップされる。
+
+### 5a.3 条件テストの検出方法
+
+| 親ノード | 検出方法 |
+|---------|---------|
+| `IfStatement` | `trace[enterIdx + 1]`（最初の子 = テスト式）の exit（1回のみ） |
+| `ConditionalExpression` | 同上 |
+| `WhileStatement` | ループ範囲内の `depth+1` exit で `BlockStatement` 以外（イテレーションごとに捕捉） |
+| `DoWhileStatement` | 同上 |
+| `ForStatement` | `depth+1` exit で `VariableDeclaration`（init）・`BlockStatement`（body）以外 |
+
+### 5a.4 ステップ数の比較
+
+`bubbleSort([3, 1, 2])` の場合:
+
+| モード | ステップ数 |
+|--------|-----------|
+| 式単位（stepIn） | 〜400 |
+| 文単位 | 〜50 |
+| **ヒューマンフレンドリー（F-12）** | **〜20** |
+
+### 5a.5 表示フォーマット
+
+```
+[宣言  ] line   3  for (let i = 0; i < n - 1; i++) {
+[条件  ] line   3  for (let i = 0; i < n - 1; i++) {   →  true
+[条件  ] line   6  if (arr[j] > arr[j + 1]) {           →  true
+[宣言  ] line   7  const tmp = arr[j];
+[代入  ] line   8  arr[j] = arr[j + 1];                 →  1
+[代入  ] line   9  arr[j + 1] = tmp;                    →  3
+[更新  ] line   5  for (let j = 0; j < n-1-i; j++) {   →  0
+```
+
+形式: `[ラベル] line NNN  <ソース行（45文字まで）>  →  値`
+
+値の表示: AssignmentExpression・UpdateExpression・CallExpression・条件式のみ。  
+VariableDeclaration・ReturnStatement・ThrowStatement は値を表示しない（ソース行が自明なため）。
+
+---
+
 ## 6. 実行モード（F-09〜F-11）
 
 ### 6.1 対話型デバッガー（F-09）
@@ -231,6 +295,8 @@ async/await を同期的にシミュレーションする。ネイティブ I/O 
 | `v` | ステップオーバー |
 | `o` | ステップアウト |
 | `b` | ステップバック |
+| `h` | ヒューマンステップ（F-12） |
+| `H` | ヒューマンステップバック（F-12） |
 | `p` / `p <変数名>` | 変数表示 |
 | `stack` | コールスタックを表示 |
 | `c` | 末尾まで実行 |
@@ -296,11 +362,11 @@ async/await を同期的にシミュレーションする。ネイティブ I/O 
 
 全機能はユニットテストでカバーする。スナップショットテストは使用しない。
 
-**テスト内訳（合計 173 件）:**
+**テスト内訳（合計 185 件）:**
 
 | ファイル | テスト数 |
 |---------|---------|
 | `src/lexer/lexer.test.js` | 45 |
 | `src/parser/parser.test.js` | 42 |
 | `src/interpreter/interpreter.test.js` | 50 |
-| `src/interpreter/debugger.test.js` | 36 |
+| `src/interpreter/debugger.test.js` | 48 |

@@ -47,6 +47,7 @@ User (developer / learner)
 | F-09 | Interactive REPL debugger | Required |
 | F-10 | File execution mode | Required |
 | F-11 | Plain REPL (non-debug) | Required |
+| F-12 | Human-friendly step | Required |
 
 ---
 
@@ -221,6 +222,68 @@ Runs until the first `enter` event matching the specified line (and optional col
 
 ---
 
+## 5a. Human-Friendly Step (F-12)
+
+### 5a.1 Motivation
+
+Expression-level stepping (F-02 – F-05) exposes every AST node evaluation event. For a single statement like `let x = 1 + 2 * 3`, this generates 12 events. While this granularity is precise, it produces too much noise for a human tracing through an algorithm on paper.
+
+F-12 provides a **"meaningful change point"** granularity that matches how a human would annotate code when tracing manually.
+
+### 5a.2 Surfaced Events
+
+Only `exit`-phase events for the following node types are surfaced:
+
+| Label | Node type | Description |
+|-------|-----------|-------------|
+| 宣言 (Declare) | `VariableDeclaration` | `let`/`const`/`var` declaration completed |
+| 代入 (Assign) | `AssignmentExpression` | Assignment or compound-assignment completed |
+| 更新 (Update) | `UpdateExpression` | `i++`, `--j`, etc. |
+| return | `ReturnStatement` | `return` executed |
+| throw | `ThrowStatement` | `throw` executed |
+| 呼出 (Call) | `CallExpression` | **User-defined function** call completed (detected by `callDepth` increase) |
+| 条件 (Condition) | condition test expression | `true`/`false` decision point of `if`, `while`, `do...while`, `for`, `? :` |
+
+**Native function calls** (e.g. `Math.floor()`, `arr.push()`) do **not** increase `callDepth` and are therefore skipped.
+
+### 5a.3 Condition Test Detection
+
+| Parent node | Detection method |
+|-------------|-----------------|
+| `IfStatement` | The exit of `trace[enterIdx + 1]` (the first child = test, evaluated once) |
+| `ConditionalExpression` | Same as `IfStatement` |
+| `WhileStatement` | All exits at `depth + 1` inside the loop range that are not `BlockStatement` (captured every iteration) |
+| `DoWhileStatement` | Same as `WhileStatement` |
+| `ForStatement` | All exits at `depth + 1` that are not `VariableDeclaration` (init) or `BlockStatement` (body) |
+
+### 5a.4 Step Count Comparison
+
+For `bubbleSort([3, 1, 2])`:
+
+| Mode | Steps |
+|------|-------|
+| Expression-level (stepIn) | ~400 |
+| Statement-level | ~50 |
+| **Human-friendly (F-12)** | **~20** |
+
+### 5a.5 Display Format
+
+```
+[宣言  ] line   3  for (let i = 0; i < n - 1; i++) {
+[条件  ] line   3  for (let i = 0; i < n - 1; i++) {   →  true
+[条件  ] line   6  if (arr[j] > arr[j + 1]) {           →  true
+[宣言  ] line   7  const tmp = arr[j];
+[代入  ] line   8  arr[j] = arr[j + 1];                 →  1
+[代入  ] line   9  arr[j + 1] = tmp;                    →  3
+[更新  ] line   5  for (let j = 0; j < n-1-i; j++) {   →  0
+```
+
+Each line shows: `[label] line NNN  <source line padded to 45 chars>  →  value`
+
+The value is displayed for AssignmentExpression, UpdateExpression, CallExpression, and condition tests. VariableDeclaration, ReturnStatement, and ThrowStatement do not display a value (the source line is self-explanatory).
+
+---
+
 ## 6. Execution Modes (F-09 – F-11)
 
 ### 6.1 Interactive Debugger (F-09)
@@ -235,16 +298,24 @@ Launch: node src/index.js --debug <file.js>
 | `v` | Step-over |
 | `o` | Step-out |
 | `b` | Step-back |
+| `h` | Human-friendly step (F-12) |
+| `H` | Human-friendly step-back (F-12) |
 | `p` | Print all variables |
 | `p <name>` | Print named variable |
 | `stack` | Print call stack |
 | `c` | Continue to end (or next breakpoint) |
 | `q` | Quit |
 
-Display format:
+Expression-level display format (`n`/`v`/`o`/`b`):
 ```
 [▶ enter] BinaryExpression        line 3:5   (depth=2, callDepth=0)
 [◀ exit ] BinaryExpression        line 3:5 → 7  (depth=2, callDepth=0)
+```
+
+Human-friendly display format (`h`/`H`):
+```
+[条件  ] line   3  for (let i = 0; i < n - 1; i++) {   →  true
+[代入  ] line   8  arr[j] = arr[j + 1];                 →  1
 ```
 
 ### 6.2 File Execution Mode (F-10)
@@ -313,11 +384,11 @@ All errors are printed as human-readable messages **without** a stack trace.
 
 All features are covered by unit tests. Test files are co-located with their source files. Explicit `expect(result).toBe(...)` assertions are used; snapshot tests are not.
 
-**Test breakdown (173 total):**
+**Test breakdown (185 total):**
 
 | File | Count |
 |------|-------|
 | `src/lexer/lexer.test.js` | 45 |
 | `src/parser/parser.test.js` | 42 |
 | `src/interpreter/interpreter.test.js` | 50 |
-| `src/interpreter/debugger.test.js` | 36 |
+| `src/interpreter/debugger.test.js` | 48 |

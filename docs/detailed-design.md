@@ -762,7 +762,82 @@ getVariables(scope):
     return result
 ```
 
-### 7.5 continue Breakpoint Matching
+### 7.5 Human-Friendly Step (F-12)
+
+#### _getHumanIndices() — Pre-computation
+
+Called once (lazily) and cached in `this._humanIndices` as a `Set<number>`. Runs in O(n) time using a single pass through the trace.
+
+```
+For each event at index i:
+
+  ① ALWAYS_EXIT types (VariableDeclaration, AssignmentExpression,
+      UpdateExpression, ReturnStatement, ThrowStatement):
+       if phase === 'exit' → add i to set
+
+  ② CallExpression — user-defined functions only:
+       Maintain a stack of open CallExpression enters.
+       When callDepth of any event exceeds the CallExpression's entry callDepth,
+       mark hasDeeper = true.
+       On exit: if hasDeeper → add i to set.
+       (Native calls such as Math.floor never increase callDepth → skipped.)
+
+  ③ IfStatement / ConditionalExpression condition test (once):
+       On enter: add trace[i+1].matchIdx to set
+       (trace[i+1] = the test child's enter; matchIdx = the test's exit index)
+
+  ④ WhileStatement / DoWhileStatement condition test (every iteration):
+       On enter: scan from i+1 to matchIdx (the loop's exit).
+       Add every exit at depth+1 where nodeType ≠ 'BlockStatement'.
+
+  ⑤ ForStatement test expression (every iteration):
+       On enter: scan from i+1 to matchIdx.
+       Add every exit at depth+1 where nodeType ∉ {'VariableDeclaration', 'BlockStatement'}.
+```
+
+#### humanStep()
+
+```
+humanSet = _getHumanIndices()
+for i = cursor+1 to trace.length-1:
+  if humanSet.has(i): cursor = i; return
+cursor = trace.length   // no more human events → done
+```
+
+#### humanStepBack()
+
+```
+humanSet = _getHumanIndices()
+for i = cursor-1 downto 0:
+  if humanSet.has(i): cursor = i; return
+// not found → no-op (stay at cursor)
+```
+
+Both operations are O(n) in the worst case, O(1) amortized when human events are dense.
+
+#### getSourceLine(line)
+
+Splits `this.source` on `'\n'` once (cached in `this._sourceLines`), then returns `_sourceLines[line - 1]` trimmed. Used by `showHuman()` in the CLI.
+
+#### CLI Display (showHuman)
+
+```
+[label ] line NNN  <source line padded to 45 chars>  →  value
+```
+
+| Label | Shown for |
+|-------|-----------|
+| `宣言` | VariableDeclaration |
+| `代入` | AssignmentExpression |
+| `更新` | UpdateExpression |
+| `return` | ReturnStatement |
+| `throw` | ThrowStatement |
+| `呼出` | CallExpression (user-defined) |
+| `条件` | Condition test exits |
+
+Value is displayed for `AssignmentExpression`, `UpdateExpression`, `CallExpression`, and condition tests. Other node types omit the value (source line is self-explanatory).
+
+### 7.7 continue Breakpoint Matching
 
 ```
 for i = cursor+1 to trace.length-1:
@@ -842,9 +917,9 @@ if (val && val.__type__ === 'JSPromise') {
 | `src/lexer/lexer.test.js` | Lexer | 45 |
 | `src/parser/parser.test.js` | Parser | 42 |
 | `src/interpreter/interpreter.test.js` | Interpreter / Recorder | 50 |
-| `src/interpreter/debugger.test.js` | JSDebugger | 36 |
+| `src/interpreter/debugger.test.js` | JSDebugger | 48 |
 
-**Total: 173 tests**
+**Total: 185 tests**
 
 ### 9.2 Debugger Test Policy
 
@@ -860,6 +935,11 @@ if (val && val.__type__ === 'JSPromise') {
 | getCallStack | empty at top level, frames accumulate in nested calls |
 | continue | runs to end without breakpoints, stops at correct line |
 | async/await | async functions return JSPromise, await resolves synchronously |
+| humanStep | VariableDeclaration/AssignmentExpression/UpdateExpression surfaced; Literal/Identifier/BinaryExpression skipped |
+| humanStep (conditions) | if/while/for condition exits captured with true/false values; all loop iterations captured |
+| humanStep (calls) | user-defined function CallExpression surfaced; native calls (Math.floor) skipped |
+| humanStepBack | retreats to previous human event; no-op at cursor=0 |
+| getSourceLine | returns trimmed source text for given line number |
 
 ---
 

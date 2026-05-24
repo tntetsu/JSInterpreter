@@ -11,6 +11,7 @@ A JavaScript interpreter written in JavaScript. Supports ES6+ syntax including a
 - **Expression-level stepping** — every AST node evaluation is a separate step, not just statements
 - **Step-back (reverse execution)** — all evaluation events are recorded as a snapshot array, allowing O(1) reverse steps; deep-cloned environments accurately restore object and array mutations
 - **async/await support** — synchronous simulation lets you step through async code that doesn't involve real I/O
+- **Human-friendly step** — `h`/`H` commands skip intermediate sub-expressions and surface only meaningful change points (assignments, conditions, loop iterations, function calls)
 - **Programmatic API** — embed `JSDebugger` into IDE integrations or external tools
 - **Interactive CLI debugger** — step through code directly in the terminal
 - **ES6+ syntax** — arrow functions, classes, destructuring, template literals, and more
@@ -76,11 +77,21 @@ JS Debugger started  commands: n=stepIn  v=stepOver  o=stepOut  b=stepBack
 | `v` | Step-over (skip current node's children) |
 | `o` | Step-out (exit current function) |
 | `b` | Step-back (go back one event) |
+| `h` | **Human-friendly step** (skip to next meaningful change point) |
+| `H` | **Human-friendly step-back** |
 | `p` | Print all variables |
 | `p <name>` | Print named variable |
 | `stack` | Print call stack |
 | `c` | Continue to end (or next breakpoint) |
 | `q` | Quit |
+
+The `h` command shows a compact one-line summary instead of the raw AST event:
+
+```
+[条件  ] line   6  if (arr[j] > arr[j + 1]) {   →  true
+[代入  ] line   8  arr[j] = arr[j + 1];           →  1
+[更新  ] line   5  for (let j = 0; ...)           →  0
+```
 
 ## Programmatic API
 
@@ -205,7 +216,7 @@ npx jest src/interpreter/debugger.test.js
 npm run test:watch
 ```
 
-173 tests across 4 files.
+185 tests across 4 files.
 
 ## Known Limitations
 
