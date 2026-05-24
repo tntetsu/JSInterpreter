@@ -1,4 +1,4 @@
-import { Environment } from './environment.js';
+import { Environment, deepClone } from './environment.js';
 import { RuntimeError } from '../errors.js';
 import { parse } from '../parser/parser.js';
 
@@ -841,9 +841,15 @@ function callFunction(callee, args, thisValue, recorder, depth, callDepth, loc) 
     // パラメーターバインド
     bindParams(callee.params, args, callEnv, recorder, depth, callDepth);
 
-    // コールスタックに追加（呼び出し時の引数値もスナップショット）
+    // コールスタックに追加（呼び出し時の引数値をディープクローンして記録）
+    // args に配列・オブジェクトが含まれる場合、関数内で書き換えられても
+    // スナップショット時点の値を表示できるようにする
     if (recorder) {
-      recorder.callStack.push({ name: callee.name || '<anonymous>', loc: loc || { line: 0, column: 0 }, args });
+      recorder.callStack.push({
+        name: callee.name || '<anonymous>',
+        loc:  loc || { line: 0, column: 0 },
+        args: args.map(a => deepClone(a)),
+      });
     }
 
     // 関数ボディは呼び出し深さを +1 して評価する
@@ -980,7 +986,7 @@ function newInstance(cls, args, recorder, depth, callDepth, loc) {
     }
 
     bindParams(cls.constructor.params, args, ctorEnv, recorder, depth, callDepth);
-    if (recorder) recorder.callStack.push({ name: cls.name, loc: loc || { line: 0, column: 0 }, args });
+    if (recorder) recorder.callStack.push({ name: cls.name, loc: loc || { line: 0, column: 0 }, args: args.map(a => deepClone(a)) });
     const result = evaluate(cls.constructor.body, ctorEnv, recorder, depth, callDepth);
     if (recorder) recorder.callStack.pop();
     if (result instanceof ThrowSignal) return result;
