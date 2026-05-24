@@ -420,4 +420,151 @@ describe('JSDebugger', () => {
       expect(dbg.getCurrentEvent().phase).toBe(evBefore.phase);
     });
   });
+
+  // ── humanStep / humanStepBack ─────────────────────────────────────────────
+  describe('humanStep / humanStepBack', () => {
+    test('変数宣言で停止する（Literal/Identifier はスキップ）', () => {
+      const dbg = new JSDebugger('let x = 42;');
+      const { event } = dbg.humanStep();
+      // 最初の human イベントは VariableDeclaration exit
+      expect(event.nodeType).toBe('VariableDeclaration');
+      expect(event.phase).toBe('exit');
+    });
+
+    test('代入式で停止する', () => {
+      const dbg = new JSDebugger('let x = 1; x = 99;');
+      dbg.humanStep(); // VariableDeclaration (let x = 1)
+      const { event } = dbg.humanStep(); // AssignmentExpression (x = 99)
+      expect(event.nodeType).toBe('AssignmentExpression');
+      expect(event.phase).toBe('exit');
+      expect(event.value).toBe(99);
+    });
+
+    test('UpdateExpression で停止する（後置++ は旧値を返す）', () => {
+      const dbg = new JSDebugger('let i = 0; i++;');
+      dbg.humanStep(); // let i = 0
+      const { event } = dbg.humanStep();
+      expect(event.nodeType).toBe('UpdateExpression');
+      expect(event.value).toBe(0); // 後置 i++ は旧値（0）を返す（i 自体は 1 になる）
+    });
+
+    test('if 文の条件式 exit で停止し true/false が取れる', () => {
+      const dbg = new JSDebugger('let x = 5; if (x > 3) { x = 10; }');
+      dbg.humanStep(); // let x = 5
+      const { event } = dbg.humanStep(); // if の条件式 exit
+      // BinaryExpression (x > 3) → true
+      expect(event.phase).toBe('exit');
+      expect(event.value).toBe(true);
+    });
+
+    test('while ループの条件式を毎イテレーション捉える', () => {
+      const dbg = new JSDebugger('let i = 0; while (i < 3) { i++; }');
+      dbg.humanStep(); // let i = 0
+
+      // 条件 → true（1回目）
+      let { event } = dbg.humanStep();
+      expect(event.value).toBe(true);
+
+      // i++ (UpdateExpression)
+      dbg.humanStep();
+
+      // 条件 → true（2回目）
+      ({ event } = dbg.humanStep());
+      expect(event.value).toBe(true);
+
+      // i++
+      dbg.humanStep();
+
+      // 条件 → true（3回目）
+      ({ event } = dbg.humanStep());
+      expect(event.value).toBe(true);
+
+      // i++
+      dbg.humanStep();
+
+      // 条件 → false（ループ終了）
+      ({ event } = dbg.humanStep());
+      expect(event.value).toBe(false);
+    });
+
+    test('for ループのテスト式で停止する', () => {
+      const dbg = new JSDebugger('for (let i = 0; i < 2; i++) {}');
+      dbg.humanStep(); // VariableDeclaration (let i = 0)
+
+      // for のテスト (i < 2) → true
+      const { event } = dbg.humanStep();
+      expect(event.phase).toBe('exit');
+      expect(event.value).toBe(true);
+    });
+
+    test('ユーザー定義関数呼び出しで停止する', () => {
+      const dbg = new JSDebugger(`
+        function add(a, b) { return a + b; }
+        let r = add(3, 4);
+      `);
+      // humanStep を繰り返して CallExpression exit を探す
+      let found = null;
+      for (let s = 0; s < 30; s++) {
+        const { event, done } = dbg.humanStep();
+        if (done) break;
+        if (event.nodeType === 'CallExpression') { found = event; break; }
+      }
+      expect(found).not.toBeNull();
+      expect(found.value).toBe(7);
+    });
+
+    test('Math.floor などネイティブ関数呼び出しでは停止しない', () => {
+      // Math.floor は callDepth を増やさないのでスキップされる
+      const dbg = new JSDebugger('let x = Math.floor(3.7);');
+      const { event } = dbg.humanStep();
+      // VariableDeclaration で止まるはず（CallExpression ではない）
+      expect(event.nodeType).toBe('VariableDeclaration');
+    });
+
+    test('ReturnStatement exit で停止する', () => {
+      const dbg = new JSDebugger(`
+        function f() { return 42; }
+        f();
+      `);
+      let found = null;
+      for (let s = 0; s < 20; s++) {
+        const { event, done } = dbg.humanStep();
+        if (done) break;
+        if (event.nodeType === 'ReturnStatement') { found = event; break; }
+      }
+      expect(found).not.toBeNull();
+      expect(found.phase).toBe('exit');
+    });
+
+    test('humanStepBack で直前の human イベントに戻る', () => {
+      const dbg = new JSDebugger('let x = 1; let y = 2; let z = 3;');
+      dbg.humanStep(); // let x = 1
+      dbg.humanStep(); // let y = 2
+      dbg.humanStep(); // let z = 3
+
+      const { event: back } = dbg.humanStepBack(); // let y = 2 に戻る
+      expect(back.nodeType).toBe('VariableDeclaration');
+
+      // cursor=0 でも no-op（クラッシュしない）
+      const dbg2 = new JSDebugger('let a = 1;');
+      dbg2.humanStepBack();
+      expect(dbg2.cursor).toBe(0);
+    });
+
+    test('humanStep で末尾まで到達したら done=true', () => {
+      const dbg = new JSDebugger('1 + 2;');
+      let result;
+      for (let s = 0; s < 50; s++) {
+        result = dbg.humanStep();
+        if (result.done) break;
+      }
+      expect(result.done).toBe(true);
+    });
+
+    test('getSourceLine でソース行が取得できる', () => {
+      const dbg = new JSDebugger('let x = 1;\nlet y = 2;');
+      expect(dbg.getSourceLine(1)).toBe('let x = 1;');
+      expect(dbg.getSourceLine(2)).toBe('let y = 2;');
+    });
+  });
 });

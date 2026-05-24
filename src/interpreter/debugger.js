@@ -188,6 +188,159 @@ class JSDebugger {
     return this._result();
   }
 
+  // ─── ヒューマンステップ ──────────────────────────────────────────────────────
+
+  /**
+   * 「意味のある変化点」インデックスの集合を遅延計算する。
+   *
+   * 対象イベント（すべて exit フェーズ）:
+   *   - VariableDeclaration / AssignmentExpression / UpdateExpression
+   *   - ReturnStatement / ThrowStatement
+   *   - CallExpression（ユーザー定義関数の呼び出しのみ、callDepth 変化で検出）
+   *   - IfStatement / ConditionalExpression の条件式 exit（true/false 確定時）
+   *   - WhileStatement / DoWhileStatement の条件式 exit（ループごとに繰り返し）
+   *   - ForStatement のテスト式 exit（init/body 以外の depth+1 exit）
+   *
+   * @returns {Set<number>}
+   */
+  _getHumanIndices() {
+    if (this._humanIndices) return this._humanIndices;
+
+    const set   = new Set();
+    const trace = this.trace;
+
+    // 無条件に対象となる exit ノード型
+    const ALWAYS_EXIT = new Set([
+      'VariableDeclaration',
+      'AssignmentExpression',
+      'UpdateExpression',
+      'ReturnStatement',
+      'ThrowStatement',
+    ]);
+
+    // CallExpression ごとに「ユーザー定義関数呼び出しか」を追跡するスタック
+    // { baseCallDepth, hasDeeper }
+    const callStack = [];
+
+    for (let i = 0; i < trace.length; i++) {
+      const ev = trace[i];
+
+      // ① 無条件に対象の exit
+      if (ev.phase === 'exit' && ALWAYS_EXIT.has(ev.nodeType)) {
+        set.add(i);
+      }
+
+      // ② CallExpression：ユーザー定義関数呼び出しのみ（callDepth 増加を検出）
+      if (ev.phase === 'enter' && ev.nodeType === 'CallExpression') {
+        callStack.push({ baseCallDepth: ev.callDepth, hasDeeper: false });
+      }
+      if (callStack.length > 0 && ev.callDepth > callStack[callStack.length - 1].baseCallDepth) {
+        callStack[callStack.length - 1].hasDeeper = true;
+      }
+      if (ev.phase === 'exit' && ev.nodeType === 'CallExpression') {
+        const info = callStack.pop();
+        if (info && info.hasDeeper) set.add(i);
+      }
+
+      // ③ IfStatement / ConditionalExpression：条件式 exit（1回のみ）
+      //    enter の直後が条件式の enter なので、そのmatchIdx が条件式 exit
+      if (ev.phase === 'enter' &&
+          (ev.nodeType === 'IfStatement' || ev.nodeType === 'ConditionalExpression')) {
+        if (i + 1 < trace.length && trace[i + 1].phase === 'enter') {
+          set.add(trace[i + 1].matchIdx);
+        }
+      }
+
+      // ④ WhileStatement / DoWhileStatement：繰り返し条件 exit
+      //    ループ範囲内の depth+1 の exit で BlockStatement 以外が条件式
+      if (ev.phase === 'enter' &&
+          (ev.nodeType === 'WhileStatement' || ev.nodeType === 'DoWhileStatement')) {
+        const loopDepth = ev.depth;
+        const endIdx    = ev.matchIdx;
+        for (let j = i + 1; j < endIdx; j++) {
+          const inner = trace[j];
+          if (inner.phase === 'exit' &&
+              inner.depth === loopDepth + 1 &&
+              inner.nodeType !== 'BlockStatement') {
+            set.add(j);
+          }
+        }
+      }
+
+      // ⑤ ForStatement：テスト式 exit（init=VariableDeclaration, body=BlockStatement 以外）
+      if (ev.phase === 'enter' && ev.nodeType === 'ForStatement') {
+        const forDepth = ev.depth;
+        const endIdx   = ev.matchIdx;
+        for (let j = i + 1; j < endIdx; j++) {
+          const inner = trace[j];
+          if (inner.phase === 'exit' &&
+              inner.depth === forDepth + 1 &&
+              inner.nodeType !== 'VariableDeclaration' &&
+              inner.nodeType !== 'BlockStatement') {
+            set.add(j);
+          }
+        }
+      }
+    }
+
+    this._humanIndices = set;
+    return set;
+  }
+
+  /**
+   * ソースコードの指定行を返す（1 始まり）。
+   * @param {number} line
+   * @returns {string}
+   */
+  getSourceLine(line) {
+    if (!this._sourceLines) {
+      this._sourceLines = this.source.split('\n');
+    }
+    return (this._sourceLines[line - 1] || '').trim();
+  }
+
+  /**
+   * humanStep — 次の「意味のある変化点」まで進む
+   *
+   * リテラル・識別子・演算子の中間評価など、人間が紙でトレースしないような
+   * 細粒度のイベントをスキップする。
+   * @returns {StepResult}
+   */
+  humanStep() {
+    if (this.isDone()) return this._result();
+
+    const humanSet = this._getHumanIndices();
+    for (let i = this.cursor + 1; i < this.trace.length; i++) {
+      if (humanSet.has(i)) {
+        this.cursor = i;
+        return this._result();
+      }
+    }
+
+    this.cursor = this.trace.length;
+    return this._result();
+  }
+
+  /**
+   * humanStepBack — 直前の「意味のある変化点」に戻る
+   * cursor === 0 の場合は no-op。
+   * @returns {StepResult}
+   */
+  humanStepBack() {
+    if (this.cursor === 0) return this._result();
+
+    const humanSet = this._getHumanIndices();
+    for (let i = this.cursor - 1; i >= 0; i--) {
+      if (humanSet.has(i)) {
+        this.cursor = i;
+        return this._result();
+      }
+    }
+
+    this.cursor = 0;
+    return this._result();
+  }
+
   // ─── 内部ヘルパー ────────────────────────────────────────────────────────────
 
   /**

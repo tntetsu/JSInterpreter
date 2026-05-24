@@ -53,6 +53,62 @@ async function runDebugger(source) {
     );
   }
 
+  /**
+   * ヒューマンステップ用の表示。
+   * 人間が紙でトレースするときに書く情報だけを1行で表示する。
+   *
+   *   [ラベル ] line NNN  ソース行（最大45文字）  →  値
+   *
+   * ラベル:
+   *   宣言  … VariableDeclaration
+   *   代入  … AssignmentExpression
+   *   更新  … UpdateExpression (i++ など)
+   *   return… ReturnStatement
+   *   throw … ThrowStatement
+   *   呼出  … CallExpression（ユーザー定義関数）
+   *   条件  … if/while/for の条件式（true/false が決まる瞬間）
+   */
+  function showHuman() {
+    if (dbg.isDone()) {
+      console.log('[完了] プログラムが終了しました。');
+      return;
+    }
+    const ev = dbg.getCurrentEvent();
+
+    // ── ラベル ──────────────────────────────────────────────────────────────
+    const LABEL_MAP = {
+      VariableDeclaration:  '宣言',
+      AssignmentExpression: '代入',
+      UpdateExpression:     '更新',
+      ReturnStatement:      'return',
+      ThrowStatement:       'throw',
+      CallExpression:       '呼出',
+    };
+    const label = (LABEL_MAP[ev.nodeType] || '条件').padEnd(6);
+
+    // ── ソース行（最大 45 文字） ─────────────────────────────────────────────
+    const MAX = 45;
+    const src = dbg.getSourceLine(ev.loc.line);
+    const srcStr = (src.length > MAX ? src.slice(0, MAX - 1) + '…' : src).padEnd(MAX);
+
+    // ── 値（意味のある場合のみ表示） ─────────────────────────────────────────
+    // 条件式・代入・更新・呼び出しの結果は表示する
+    // ReturnStatement / ThrowStatement / VariableDeclaration は値が signal なので非表示
+    const SHOW_VALUE = new Set(['AssignmentExpression', 'UpdateExpression', 'CallExpression']);
+    const isCondition = !new Set([
+      'VariableDeclaration', 'AssignmentExpression', 'UpdateExpression',
+      'ReturnStatement', 'ThrowStatement', 'CallExpression',
+    ]).has(ev.nodeType);
+
+    let valStr = '';
+    if ((isCondition || SHOW_VALUE.has(ev.nodeType)) && ev.value !== undefined) {
+      valStr = `  →  ${formatValue(ev.value)}`;
+    }
+
+    const lineStr = String(ev.loc.line).padStart(3);
+    console.log(`[${label}] line ${lineStr}  ${srcStr}${valStr}`);
+  }
+
   function showVars() {
     const vars = dbg.getVariables('all');
     const entries = Object.entries(vars);
@@ -80,6 +136,7 @@ async function runDebugger(source) {
 
   console.log('─'.repeat(60));
   console.log('JS デバッガー起動  コマンド: n=stepIn  v=stepOver  o=stepOut  b=stepBack');
+  console.log('                           h=ヒューマンステップ  H=ヒューマンバック');
   console.log('                           p=変数表示  stack=スタック  c=continue  q=終了');
   console.log('─'.repeat(60));
   showCurrent();
@@ -108,6 +165,16 @@ async function runDebugger(source) {
       case 'b':
         dbg.stepBack();
         showCurrent();
+        break;
+
+      case 'h':
+        dbg.humanStep();
+        showHuman();
+        break;
+
+      case 'H':
+        dbg.humanStepBack();
+        showHuman();
         break;
 
       case 'p':
