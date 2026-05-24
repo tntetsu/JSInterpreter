@@ -279,7 +279,7 @@ function renderVariables(event) {
   variablesEl.innerHTML = html || '<p class="placeholder">—</p>';
 }
 
-/** コールスタックを描画 */
+/** コールスタックを描画（引数値を含む） */
 function renderCallStack(event) {
   if (!event) {
     callstackEl.innerHTML = '<p class="placeholder">—</p>';
@@ -287,12 +287,21 @@ function renderCallStack(event) {
   }
 
   const frames = [...(event.callStack ?? [])].reverse();
-  let html = frames.map(f =>
-    `<div class="stack-frame">` +
-      `<span class="frame-name">${esc(f.name || '<anonymous>')}</span>` +
+  let html = frames.map(f => {
+    // 引数を最大 3 件フォーマット（それ以上は "…" で省略）
+    let argsHtml = '';
+    if (f.args && f.args.length > 0) {
+      const parts = f.args.slice(0, 3).map(a => formatValue(a, 0));
+      if (f.args.length > 3) parts.push('<span class="v-muted">…</span>');
+      argsHtml = parts.join(', ');
+    }
+    return `<div class="stack-frame">` +
+      `<span class="frame-name">${esc(f.name || '<anonymous>')}` +
+        `<span class="frame-args">(${argsHtml})</span>` +
+      `</span>` +
       `<span class="frame-loc">line ${f.loc.line}</span>` +
-    `</div>`
-  ).join('');
+    `</div>`;
+  }).join('');
   html += `<div class="stack-frame stack-top"><span class="frame-name">&lt;top&gt;</span></div>`;
 
   callstackEl.innerHTML = html;

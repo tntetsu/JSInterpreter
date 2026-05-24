@@ -542,8 +542,20 @@ main {
 .stack-frame:last-child { border-bottom: none; }
 
 .frame-name { color: var(--purple); font-weight: 600; }
+.frame-args { color: var(--subtext0); font-weight: 400; font-size: 11.5px; }
 .frame-loc  { color: var(--muted); font-size: 11px; }
 .stack-top .frame-name { color: var(--muted); font-style: italic; font-weight: 400; }
+
+/* 引数値の型カラー（変数パネルと共通） */
+.frame-args .v-num  { color: var(--teal); }
+.frame-args .v-str  { color: var(--green); }
+.frame-args .v-bool { color: var(--purple); }
+.frame-args .v-null,
+.frame-args .v-undef { color: var(--muted); font-style: italic; }
+.frame-args .v-fn   { color: var(--muted); }
+.frame-args .v-arr  { color: var(--yellow); }
+.frame-args .v-obj  { color: var(--peach); }
+.v-muted            { color: var(--muted); }
 
 /* ──────────────────────────────────────────────────────
    Console output
