@@ -202,13 +202,15 @@ class JSDebugger {
   /**
    * 「意味のある変化点」インデックスの集合を遅延計算する。
    *
-   * 対象イベント（すべて exit フェーズ）:
-   *   - VariableDeclaration / AssignmentExpression / UpdateExpression
-   *   - ReturnStatement / ThrowStatement
-   *   - CallExpression（ユーザー定義関数の呼び出しのみ、callDepth 変化で検出）
-   *   - IfStatement / ConditionalExpression の条件式 exit（true/false 確定時）
-   *   - WhileStatement / DoWhileStatement の条件式 exit（ループごとに繰り返し）
-   *   - ForStatement のテスト式 exit（init/body 以外の depth+1 exit）
+   * 対象イベント:
+   *   - exit: VariableDeclaration / AssignmentExpression / UpdateExpression
+   *   - exit: ReturnStatement / ThrowStatement
+   *   - enter: CallExpression（ユーザー定義関数のみ）           ← 呼び出し直前
+   *   - enter: 関数本体の最初のステートメント                   ← 関数に入った直後
+   *   - exit:  CallExpression（ユーザー定義関数のみ）           ← 関数が返った直後
+   *   - exit: IfStatement / ConditionalExpression の条件式（true/false 確定時）
+   *   - exit: WhileStatement / DoWhileStatement の条件式（ループごと）
+   *   - exit: ForStatement のテスト式（init/body 以外の depth+1 exit）
    *
    * @returns {Set<number>}
    */
@@ -227,8 +229,13 @@ class JSDebugger {
       'ThrowStatement',
     ]);
 
-    // CallExpression ごとに「ユーザー定義関数呼び出しか」を追跡するスタック
-    // { baseCallDepth, hasDeeper }
+    // CallExpression ごとの追跡スタック
+    // {
+    //   baseCallDepth: number,   // CallExpression 時点の callDepth
+    //   enterIdx:      number,   // enter CallExpression のトレースインデックス
+    //   state:         0|1|2,    // 0=未入場 1=入場済み(最初stmt待ち) 2=最初stmt追加済み
+    //   innerDepth:    number,   // BlockStatement.depth+1（−1 は未確定）
+    // }
     const callStack = [];
 
     for (let i = 0; i < trace.length; i++) {
@@ -239,16 +246,52 @@ class JSDebugger {
         set.add(i);
       }
 
-      // ② CallExpression：ユーザー定義関数呼び出しのみ（callDepth 増加を検出）
+      // ② CallExpression：ユーザー定義関数呼び出しのみ（callDepth 増加で判定）
+      //
+      //   humanStep で止まる3点：
+      //     (A) enter CallExpression  — 関数を呼ぼうとしている瞬間
+      //     (B) 関数本体の最初のステートメント enter — 関数に入った直後
+      //     (C) exit  CallExpression  — 関数が返った瞬間（戻り値確定）
       if (ev.phase === 'enter' && ev.nodeType === 'CallExpression') {
-        callStack.push({ baseCallDepth: ev.callDepth, hasDeeper: false });
+        callStack.push({
+          baseCallDepth: ev.callDepth,
+          enterIdx:      i,
+          state:         0,
+          innerDepth:    -1,
+        });
       }
-      if (callStack.length > 0 && ev.callDepth > callStack[callStack.length - 1].baseCallDepth) {
-        callStack[callStack.length - 1].hasDeeper = true;
+
+      if (callStack.length > 0) {
+        const top = callStack[callStack.length - 1];
+
+        if (ev.callDepth > top.baseCallDepth) {
+          // 関数本体に入った
+          if (top.state === 0) {
+            top.state = 1;
+            set.add(top.enterIdx);   // (A) enter CallExpression を追加
+          }
+
+          // (B) 関数本体の最初のステートメントを探す
+          if (top.state === 1 && ev.phase === 'enter') {
+            if (ev.nodeType === 'BlockStatement' && top.innerDepth < 0) {
+              // ブロック本体：次の depth+1 のノードが最初のステートメント
+              top.innerDepth = ev.depth + 1;
+            } else if (top.innerDepth < 0) {
+              // 式本体のアロー関数（BlockStatement なし）：このノードが本体
+              set.add(i);
+              top.state = 2;
+            } else if (ev.depth === top.innerDepth) {
+              // BlockStatement の直下の最初のステートメント
+              set.add(i);
+              top.state = 2;
+            }
+          }
+        }
       }
+
       if (ev.phase === 'exit' && ev.nodeType === 'CallExpression') {
         const info = callStack.pop();
-        if (info && info.hasDeeper) set.add(i);
+        if (info && info.state > 0) set.add(i);   // (C) exit CallExpression を追加
       }
 
       // ③ IfStatement / ConditionalExpression：条件式 exit（1回のみ）

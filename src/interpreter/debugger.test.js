@@ -495,7 +495,23 @@ describe('JSDebugger', () => {
       expect(event.value).toBe(true);
     });
 
-    test('ユーザー定義関数呼び出しで停止する', () => {
+    test('ユーザー定義関数呼び出しで enter に停止する（呼び出し直前）', () => {
+      const dbg = new JSDebugger(`
+        function add(a, b) { return a + b; }
+        let r = add(3, 4);
+      `);
+      // humanStep を繰り返して CallExpression enter を探す
+      let found = null;
+      for (let s = 0; s < 30; s++) {
+        const { event, done } = dbg.humanStep();
+        if (done) break;
+        if (event.nodeType === 'CallExpression' && event.phase === 'enter') { found = event; break; }
+      }
+      expect(found).not.toBeNull();
+      expect(found.phase).toBe('enter');
+    });
+
+    test('ユーザー定義関数呼び出しで exit にも停止する（戻り値確定後）', () => {
       const dbg = new JSDebugger(`
         function add(a, b) { return a + b; }
         let r = add(3, 4);
@@ -505,10 +521,36 @@ describe('JSDebugger', () => {
       for (let s = 0; s < 30; s++) {
         const { event, done } = dbg.humanStep();
         if (done) break;
-        if (event.nodeType === 'CallExpression') { found = event; break; }
+        if (event.nodeType === 'CallExpression' && event.phase === 'exit') { found = event; break; }
       }
       expect(found).not.toBeNull();
       expect(found.value).toBe(7);
+    });
+
+    test('関数本体の最初のステートメントで停止する', () => {
+      const dbg = new JSDebugger(`
+        function add(a, b) { return a + b; }
+        add(3, 4);
+      `);
+      // humanStep を繰り返して enter CallExpression の次の停止点を確認
+      let enterFound = false;
+      let firstStmtEvent = null;
+      for (let s = 0; s < 30; s++) {
+        const { event, done } = dbg.humanStep();
+        if (done) break;
+        if (!enterFound && event.nodeType === 'CallExpression' && event.phase === 'enter') {
+          enterFound = true;
+          continue;
+        }
+        if (enterFound) {
+          firstStmtEvent = event;
+          break;
+        }
+      }
+      expect(firstStmtEvent).not.toBeNull();
+      // 関数本体の最初のステートメントは ReturnStatement
+      expect(firstStmtEvent.nodeType).toBe('ReturnStatement');
+      expect(firstStmtEvent.phase).toBe('enter');
     });
 
     test('Math.floor などネイティブ関数呼び出しでは停止しない', () => {
@@ -519,7 +561,7 @@ describe('JSDebugger', () => {
       expect(event.nodeType).toBe('VariableDeclaration');
     });
 
-    test('ReturnStatement exit で停止する', () => {
+    test('ReturnStatement exit で停止する（ALWAYS_EXIT）', () => {
       const dbg = new JSDebugger(`
         function f() { return 42; }
         f();
@@ -528,10 +570,13 @@ describe('JSDebugger', () => {
       for (let s = 0; s < 20; s++) {
         const { event, done } = dbg.humanStep();
         if (done) break;
-        if (event.nodeType === 'ReturnStatement') { found = event; break; }
+        // exit のみを対象にする（enter は関数本体の最初ステートメントとして別途追加される）
+        if (event.nodeType === 'ReturnStatement' && event.phase === 'exit') { found = event; break; }
       }
       expect(found).not.toBeNull();
       expect(found.phase).toBe('exit');
+      // ReturnStatement の value は ReturnSignal { value: 42 }
+      expect(found.value?.value).toBe(42);
     });
 
     test('humanStepBack で直前の human イベントに戻る', () => {
