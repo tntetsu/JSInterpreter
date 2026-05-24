@@ -119,13 +119,16 @@ class Token {
    * @param {number} line        行番号（1 始まり）
    * @param {number} column      列番号（1 始まり）
    * @param {boolean} wasNewlineBefore  直前に改行があったか（ASI 判定用）
+   * @param {number} [endColumn]  トークン末尾の列番号（1 始まり、含む）
    */
-  constructor(type, lexeme, line, column, wasNewlineBefore = false) {
+  constructor(type, lexeme, line, column, wasNewlineBefore = false, endColumn = null) {
     this.type = type;
     this.lexeme = lexeme;
     this.line = line;
     this.column = column;
     this.wasNewlineBefore = wasNewlineBefore;
+    // endColumn: ソース上でのトークン末尾列（1-based, inclusive）
+    this.endColumn = endColumn !== null ? endColumn : column + (lexeme.length > 0 ? lexeme.length - 1 : 0);
   }
 
   toString() {
@@ -155,7 +158,8 @@ class Lexer {
       this.start = this.current;
       this.scanToken();
     }
-    this.tokens.push(new Token(TokenType.EOF, '', this.line, this.current - this.lineStart + 1, this.hadNewline));
+    const eofCol = this.current - this.lineStart + 1;
+    this.tokens.push(new Token(TokenType.EOF, '', this.line, eofCol, this.hadNewline, eofCol));
     return this.tokens;
   }
 
@@ -175,7 +179,9 @@ class Lexer {
 
   addToken(type, value) {
     const lexeme = (value !== undefined) ? String(value) : this.source.slice(this.start, this.current);
-    this.tokens.push(new Token(type, lexeme, this.line, this.column, this.hadNewline));
+    // ソース上の実際の長さ（エスケープ展開済み文字列でも正確な末尾位置を得る）
+    const endColumn = this.column + (this.current - this.start) - 1;
+    this.tokens.push(new Token(type, lexeme, this.line, this.column, this.hadNewline, endColumn));
     this.hadNewline = false;
   }
 

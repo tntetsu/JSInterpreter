@@ -56,6 +56,12 @@ class Parser {
   // 現在位置の loc（次のトークン）
   currentLoc() { return this.loc(this.peek()); }
 
+  // 直前に消費したトークンの末尾位置（式ノードの end フィールドに使用）
+  endLoc() {
+    const prev = this.previous();
+    return { line: prev.line, column: prev.endColumn };
+  }
+
   // ─── トップレベル ────────────────────────────────────────────────────────────
 
   parse() {
@@ -552,7 +558,7 @@ class Parser {
       if (this.match(op)) {
         const operator = this.previous().lexeme; // 右辺パース前に演算子を保存
         const right = this.parseAssignment();
-        return { type: 'AssignmentExpression', operator, left: expr, right, loc };
+        return { type: 'AssignmentExpression', operator, left: expr, right, loc, end: this.endLoc() };
       }
     }
 
@@ -566,7 +572,7 @@ class Parser {
       const consequent = this.parseAssignment();
       this.consume(TokenType.COLON, "':' を期待");
       const alternate = this.parseAssignment();
-      return { type: 'ConditionalExpression', test: expr, consequent, alternate, loc };
+      return { type: 'ConditionalExpression', test: expr, consequent, alternate, loc, end: this.endLoc() };
     }
     return expr;
   }
@@ -647,7 +653,7 @@ class Parser {
     const left = this.parseUnary();
     if (this.match(TokenType.STAR_STAR)) {
       const right = this.parseExponentiation(); // 右結合
-      return { type: 'BinaryExpression', operator: '**', left, right, loc };
+      return { type: 'BinaryExpression', operator: '**', left, right, loc, end: this.endLoc() };
     }
     return left;
   }
@@ -658,7 +664,7 @@ class Parser {
     while (this.match(...ops)) {
       const op = this.previous().lexeme;
       const right = next();
-      left = { type: nodeType, operator: op, left, right, loc };
+      left = { type: nodeType, operator: op, left, right, loc, end: this.endLoc() };
     }
     return left;
   }
@@ -671,20 +677,20 @@ class Parser {
     if (this.match(...unaryOps, ...wordOps)) {
       const op = this.previous().lexeme;
       const arg = this.parseUnary();
-      return { type: 'UnaryExpression', operator: op, prefix: true, argument: arg, loc: this.loc(tok) };
+      return { type: 'UnaryExpression', operator: op, prefix: true, argument: arg, loc: this.loc(tok), end: this.endLoc() };
     }
 
     // await 式（AwaitExpression ノードとして生成）
     if (this.match(TokenType.AWAIT)) {
       const arg = this.parseUnary();
-      return { type: 'AwaitExpression', argument: arg, loc: this.loc(tok) };
+      return { type: 'AwaitExpression', argument: arg, loc: this.loc(tok), end: this.endLoc() };
     }
 
     // 前置 ++/--
     if (this.match(TokenType.PLUS_PLUS, TokenType.MINUS_MINUS)) {
       const op = this.previous().lexeme;
       const arg = this.parseUnary();
-      return { type: 'UpdateExpression', operator: op, prefix: true, argument: arg, loc: this.loc(tok) };
+      return { type: 'UpdateExpression', operator: op, prefix: true, argument: arg, loc: this.loc(tok), end: this.endLoc() };
     }
 
     return this.parsePostfix();
@@ -696,7 +702,7 @@ class Parser {
 
     if (!this.peek().wasNewlineBefore) {
       if (this.match(TokenType.PLUS_PLUS, TokenType.MINUS_MINUS)) {
-        return { type: 'UpdateExpression', operator: this.previous().lexeme, prefix: false, argument: expr, loc };
+        return { type: 'UpdateExpression', operator: this.previous().lexeme, prefix: false, argument: expr, loc, end: this.endLoc() };
       }
     }
     return expr;
@@ -709,26 +715,26 @@ class Parser {
     while (true) {
       if (this.match(TokenType.LPAREN)) {
         const { args, spread } = this.parseArguments();
-        expr = { type: 'CallExpression', callee: expr, arguments: args, loc };
+        expr = { type: 'CallExpression', callee: expr, arguments: args, loc, end: this.endLoc() };
       } else if (this.match(TokenType.DOT)) {
         const prop = this.parseIdentifierOrKeyword();
-        expr = { type: 'MemberExpression', object: expr, property: prop, computed: false, loc };
+        expr = { type: 'MemberExpression', object: expr, property: prop, computed: false, loc, end: this.endLoc() };
       } else if (this.match(TokenType.LBRACKET)) {
         const prop = this.parseExpression();
         this.consume(TokenType.RBRACKET, "']' を期待");
-        expr = { type: 'MemberExpression', object: expr, property: prop, computed: true, loc };
+        expr = { type: 'MemberExpression', object: expr, property: prop, computed: true, loc, end: this.endLoc() };
       } else if (this.match(TokenType.QUESTION_DOT)) {
         if (this.check(TokenType.LPAREN)) {
           this.advance();
           const { args } = this.parseArguments();
-          expr = { type: 'OptionalCallExpression', callee: expr, arguments: args, loc };
+          expr = { type: 'OptionalCallExpression', callee: expr, arguments: args, loc, end: this.endLoc() };
         } else if (this.match(TokenType.LBRACKET)) {
           const prop = this.parseExpression();
           this.consume(TokenType.RBRACKET, "']' を期待");
-          expr = { type: 'OptionalMemberExpression', object: expr, property: prop, computed: true, loc };
+          expr = { type: 'OptionalMemberExpression', object: expr, property: prop, computed: true, loc, end: this.endLoc() };
         } else {
           const prop = this.parseIdentifierOrKeyword();
-          expr = { type: 'OptionalMemberExpression', object: expr, property: prop, computed: false, loc };
+          expr = { type: 'OptionalMemberExpression', object: expr, property: prop, computed: false, loc, end: this.endLoc() };
         }
       } else {
         break;
@@ -761,7 +767,7 @@ class Parser {
       if (this.match(TokenType.LPAREN)) {
         ({ args } = this.parseArguments());
       }
-      return { type: 'NewExpression', callee, arguments: args, loc };
+      return { type: 'NewExpression', callee, arguments: args, loc, end: this.endLoc() };
     }
     return this.parsePrimary();
   }
@@ -777,14 +783,14 @@ class Parser {
     const loc = this.loc(tok);
 
     if (this.match(TokenType.NUMBER)) {
-      return { type: 'Literal', value: Number(this.previous().lexeme), raw: this.previous().lexeme, loc };
+      return { type: 'Literal', value: Number(this.previous().lexeme), raw: this.previous().lexeme, loc, end: this.endLoc() };
     }
     if (this.match(TokenType.STRING)) {
-      return { type: 'Literal', value: this.previous().lexeme, raw: JSON.stringify(this.previous().lexeme), loc };
+      return { type: 'Literal', value: this.previous().lexeme, raw: JSON.stringify(this.previous().lexeme), loc, end: this.endLoc() };
     }
-    if (this.match(TokenType.TRUE))  return { type: 'Literal', value: true,  loc };
-    if (this.match(TokenType.FALSE)) return { type: 'Literal', value: false, loc };
-    if (this.match(TokenType.NULL))  return { type: 'Literal', value: null,  loc };
+    if (this.match(TokenType.TRUE))  return { type: 'Literal', value: true,  loc, end: this.endLoc() };
+    if (this.match(TokenType.FALSE)) return { type: 'Literal', value: false, loc, end: this.endLoc() };
+    if (this.match(TokenType.NULL))  return { type: 'Literal', value: null,  loc, end: this.endLoc() };
 
     if (this.match(TokenType.TEMPLATE_NO_SUB)) {
       return { type: 'TemplateLiteral', quasis: [{ type: 'TemplateElement', value: this.previous().lexeme, tail: true }], expressions: [], loc };
@@ -793,8 +799,8 @@ class Parser {
       return this.parseTemplateLiteralTail(loc, this.previous().lexeme);
     }
 
-    if (this.match(TokenType.THIS))  return { type: 'ThisExpression', loc };
-    if (this.match(TokenType.SUPER)) return { type: 'Super', loc };
+    if (this.match(TokenType.THIS))  return { type: 'ThisExpression', loc, end: this.endLoc() };
+    if (this.match(TokenType.SUPER)) return { type: 'Super', loc, end: this.endLoc() };
 
     // async function 式
     if (this.check(TokenType.ASYNC) && this.tokens[this.current + 1]?.type === TokenType.FUNCTION &&
@@ -938,7 +944,7 @@ class Parser {
     }
 
     this.consume(TokenType.RBRACE, "'}' を期待");
-    return { type: 'ObjectExpression', properties, loc };
+    return { type: 'ObjectExpression', properties, loc, end: this.endLoc() };
   }
 
   isCommaOrBrace() {
@@ -960,7 +966,7 @@ class Parser {
       if (!this.check(TokenType.RBRACKET)) this.consume(TokenType.COMMA, "',' を期待");
     }
     this.consume(TokenType.RBRACKET, "']' を期待");
-    return { type: 'ArrayExpression', elements, loc };
+    return { type: 'ArrayExpression', elements, loc, end: this.endLoc() };
   }
 
   // 括弧式またはアロー関数
@@ -1032,13 +1038,13 @@ class Parser {
       throw new ParseError('識別子を期待', tok.line, tok.column);
     }
     const tok = this.advance();
-    return { type: 'Identifier', name: tok.lexeme, loc: this.loc(tok) };
+    return { type: 'Identifier', name: tok.lexeme, loc: this.loc(tok), end: this.endLoc() };
   }
 
   parseIdentifierOrKeyword() {
     // どのトークンでも識別子として扱う
     const tok = this.advance();
-    return { type: 'Identifier', name: tok.lexeme, loc: this.loc(tok) };
+    return { type: 'Identifier', name: tok.lexeme, loc: this.loc(tok), end: this.endLoc() };
   }
 
   checkIdentifierName() {

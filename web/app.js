@@ -166,16 +166,41 @@ function esc(s) {
 // UI 描画
 // ──────────────────────────────────────────────────────────────────────────────
 
-/** ソースコード表示（currentLine の行をハイライト） */
-function renderSource(source, currentLine) {
+/**
+ * ソースコード表示（currentLine の行をハイライト）
+ * event.end が同一行を指す場合は、式の列範囲もさらに強調する。
+ */
+function renderSource(source, currentLine, event) {
   const lines = source.split('\n');
+
+  // 式ハイライト：同一行で end が存在する場合のみ
+  const exprStart = (event?.end && event.loc.line === event.end.line)
+    ? event.loc.column    // 1-based 開始列
+    : null;
+  const exprEnd = exprStart !== null ? event.end.column : null; // 1-based 終了列（含む）
+
   let html = '';
   for (let i = 0; i < lines.length; i++) {
     const num    = i + 1;
     const active = num === currentLine;
+    const lineStr = lines[i];
+
+    let textHtml;
+    if (active && exprStart !== null) {
+      // 式の範囲を三分割して中央を強調
+      const s = exprStart - 1;   // 0-based 開始インデックス
+      const e = exprEnd;          // 0-based 終了インデックス（exclusive）
+      const before = esc(lineStr.slice(0, s));
+      const expr   = esc(lineStr.slice(s, e));
+      const after  = esc(lineStr.slice(e));
+      textHtml = `<span class="src-text">${before}<span class="src-expr">${expr || ' '}</span>${after}</span>`;
+    } else {
+      textHtml = `<span class="src-text">${esc(lineStr) || ' '}</span>`;
+    }
+
     html += `<div class="src-line${active ? ' active' : ''}" data-line="${num}">` +
       `<span class="src-num">${num}</span>` +
-      `<span class="src-text">${esc(lines[i]) || ' '}</span>` +
+      textHtml +
       `</div>`;
   }
   sourceLines.innerHTML = html;
@@ -313,7 +338,7 @@ function updateUI() {
   const cursor = dbg.cursor;
   const total  = dbg.trace.length;
 
-  renderSource(dbg.source, event ? event.loc.line : 0);
+  renderSource(dbg.source, event ? event.loc.line : 0, event);
   renderCurrentEvent(event);
   renderVariables(event);
   renderCallStack(event);

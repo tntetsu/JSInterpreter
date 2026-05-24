@@ -262,6 +262,15 @@ main {
   color: var(--text);
 }
 
+/* 現在評価中の式ノードを列単位で強調 */
+.src-expr {
+  background: rgba(249, 226, 175, 0.28);
+  border-radius: 2px;
+  outline: 1px solid rgba(249, 226, 175, 0.55);
+  color: var(--yellow);
+  font-weight: 600;
+}
+
 /* ──────────────────────────────────────────────────────
    Step counter
 ────────────────────────────────────────────────────── */
