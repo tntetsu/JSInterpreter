@@ -126,6 +126,13 @@ exampleSelect.addEventListener('change', () => {
 });
 
 // ──────────────────────────────────────────────────────────────────────────────
+// トレース表: 状態変数
+// ──────────────────────────────────────────────────────────────────────────────
+
+let traceEnabled  = false;    // トレース表のON/OFF
+let condEventMap  = new Map(); // traceIndex → 条件式テキスト（startDebugger時に1回構築）
+
+// ──────────────────────────────────────────────────────────────────────────────
 // 値フォーマット
 // ──────────────────────────────────────────────────────────────────────────────
 
@@ -178,33 +185,201 @@ function esc(s) {
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
+// トレース表: ヘルパー関数
+// ──────────────────────────────────────────────────────────────────────────────
+
+/**
+ * ソース位置 (loc/end) から条件式テキストを切り出す
+ * loc.column / end.column は 1-based（renderSource と同仕様）
+ */
+function extractCondText(source, loc, end) {
+  if (!end) return null;
+  const lines = source.split('\n');
+  if (loc.line === end.line) {
+    return (lines[loc.line - 1] || '').slice(loc.column - 1, end.column).trim();
+  }
+  const parts = [];
+  for (let l = loc.line; l <= end.line; l++) {
+    const s = lines[l - 1] || '';
+    if      (l === loc.line) parts.push(s.slice(loc.column - 1));
+    else if (l === end.line) parts.push(s.slice(0, end.column));
+    else                     parts.push(s);
+  }
+  return parts.join(' ').trim();
+}
+
+/**
+ * トレース全体を1回スキャンして condEventMap を構築する。
+ * Human-step の条件式 exit イベント（if/while/for の条件部）を対象とする。
+ */
+function buildCondEventMap() {
+  condEventMap = new Map();
+  if (!dbg) return;
+
+  const ALWAYS_EXIT = new Set([
+    'VariableDeclaration', 'AssignmentExpression', 'UpdateExpression',
+    'ReturnStatement', 'ThrowStatement',
+  ]);
+  const humanIndices = dbg._getHumanIndices();
+
+  for (const i of humanIndices) {
+    const ev = dbg.trace[i];
+    if (ev.phase !== 'exit')              continue;
+    if (ALWAYS_EXIT.has(ev.nodeType))     continue;
+    if (ev.nodeType === 'CallExpression') continue;
+
+    const text = extractCondText(dbg.source, ev.loc, ev.end);
+    if (text) condEventMap.set(i, text);
+  }
+}
+
+/**
+ * イベントのスコープチェーンからユーザー変数をフラットに取り出す
+ * (renderVariables のデフォルト表示と同じロジック)
+ */
+function getMergedVars(event) {
+  if (!event?.env) return {};
+  const frames    = event.env;
+  const globalIdx = frames.length - 1;
+  const result    = {};
+  for (let fi = 0; fi < frames.length; fi++) {
+    const frame    = frames[fi];
+    const isGlobal = fi === globalIdx;
+    for (const k of Object.keys(frame)) {
+      if (k in result)          continue;
+      if (isInternal(frame[k])) continue;
+      if (isGlobal && BUILTIN_NAMES.has(k)) continue;
+      result[k] = frame[k];
+    }
+  }
+  return result;
+}
+
+/**
+ * trace[0..cursor] をスキャンしてトレース表のデータを返す。
+ *
+ * 戻り値:
+ *   lineStates : Map<lineNum, { vars, conds }>
+ *                各行を最後に実行した時点の変数・条件値
+ *   varNames   : string[]   — 見つかった変数名（登場順）
+ *   condTexts  : string[]   — 見つかった条件式テキスト（登場順）
+ *   changedVars: Set<string>— cursor 直前→cursor で変化した変数名
+ *                             条件は 'cond:' + condText のキー
+ */
+function buildTraceData(cursor) {
+  const lineStates = new Map();
+  const varNames   = [];
+  const condTexts  = [];
+  const changedVars = new Set();
+
+  let prevVars = null;
+
+  for (let c = 0; c <= cursor && c < dbg.trace.length; c++) {
+    const ev   = dbg.trace[c];
+    const line = ev.loc.line;
+
+    if (!lineStates.has(line)) lineStates.set(line, { vars: {}, conds: {} });
+    const ls = lineStates.get(line);
+
+    // 変数スナップショットを更新
+    const vars = getMergedVars(ev);
+    for (const k of Object.keys(vars)) {
+      if (!varNames.includes(k)) varNames.push(k);
+    }
+    ls.vars = vars;
+
+    // 条件式の値を更新
+    if (ev.phase === 'exit') {
+      const condText = condEventMap.get(c);
+      if (condText) {
+        if (!condTexts.includes(condText)) condTexts.push(condText);
+        ls.conds[condText] = ev.value;
+      }
+    }
+
+    // cursor 直前との差分を記録（フラッシュアニメーション用）
+    if (c === cursor) {
+      if (prevVars !== null) {
+        for (const k of varNames) {
+          try {
+            if (JSON.stringify(prevVars[k]) !== JSON.stringify(vars[k])) {
+              changedVars.add(k);
+            }
+          } catch { changedVars.add(k); }
+        }
+      }
+      const condText = condEventMap.get(c);
+      if (condText) changedVars.add('cond:' + condText);
+    }
+
+    if (c === cursor - 1) prevVars = vars;
+  }
+
+  return { lineStates, varNames, condTexts, changedVars };
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
 // UI 描画
 // ──────────────────────────────────────────────────────────────────────────────
 
 /**
  * ソースコード表示（currentLine の行をハイライト）
- * event.end が同一行を指す場合は、式の列範囲もさらに強調する。
+ * traceEnabled 時は各行の右側に変数・条件式の列を追加する。
  */
 function renderSource(source, currentLine, event) {
   const lines = source.split('\n');
 
   // 式ハイライト：同一行で end が存在する場合のみ
   const exprStart = (event?.end && event.loc.line === event.end.line)
-    ? event.loc.column    // 1-based 開始列
-    : null;
-  const exprEnd = exprStart !== null ? event.end.column : null; // 1-based 終了列（含む）
+    ? event.loc.column : null;
+  const exprEnd = exprStart !== null ? event.end.column : null;
+
+  // ── トレース表データ ────────────────────────────────────────────
+  let traceData = null;
+  if (traceEnabled && dbg) {
+    traceData = buildTraceData(dbg.cursor);
+  }
+  const { lineStates, varNames, condTexts, changedVars } = traceData ?? {};
+  const allCols = traceEnabled
+    ? [...(varNames ?? []), ...(condTexts ?? [])]
+    : [];
+  const nVars = varNames?.length ?? 0;
+
+  // ── テーブルモード切替 ─────────────────────────────────────────
+  if (traceEnabled) {
+    sourceDisplay.classList.add('trace-on');
+  } else {
+    sourceDisplay.classList.remove('trace-on');
+  }
 
   let html = '';
+
+  // ── ヘッダー行（列名） ─────────────────────────────────────────
+  if (traceEnabled && allCols.length > 0) {
+    html += `<div class="src-line src-trace-hdr">` +
+      `<span class="src-num"></span>` +
+      `<span class="src-text"></span>` +
+      `<span class="trace-vsep"></span>` +
+      allCols.map((col, ci) => {
+        const isCond = ci >= nVars;
+        const label  = col.length > 14 ? col.slice(0, 13) + '…' : col;
+        const cls    = isCond ? 'trace-cell-hd trace-cond-hd' : 'trace-cell-hd';
+        return `<span class="${cls}" title="${esc(col)}">${esc(label)}</span>`;
+      }).join('') +
+      `</div>`;
+  }
+
+  // ── ソース行 ───────────────────────────────────────────────────
   for (let i = 0; i < lines.length; i++) {
-    const num    = i + 1;
-    const active = num === currentLine;
+    const num     = i + 1;
+    const active  = num === currentLine;
     const lineStr = lines[i];
 
+    // 式ハイライト
     let textHtml;
     if (active && exprStart !== null) {
-      // 式の範囲を三分割して中央を強調
-      const s = exprStart - 1;   // 0-based 開始インデックス
-      const e = exprEnd;          // 0-based 終了インデックス（exclusive）
+      const s      = exprStart - 1;
+      const e      = exprEnd;
       const before = esc(lineStr.slice(0, s));
       const expr   = esc(lineStr.slice(s, e));
       const after  = esc(lineStr.slice(e));
@@ -213,11 +388,34 @@ function renderSource(source, currentLine, event) {
       textHtml = `<span class="src-text">${esc(lineStr) || ' '}</span>`;
     }
 
+    // トレース列
+    let tracePart = '';
+    if (traceEnabled && allCols.length > 0) {
+      const ls = lineStates?.get(num) ?? { vars: {}, conds: {} };
+      tracePart = `<span class="trace-vsep"></span>` +
+        allCols.map((col, ci) => {
+          const isCond   = ci >= nVars;
+          const changed  = isCond
+            ? (active && changedVars?.has('cond:' + col))
+            : (active && changedVars?.has(col));
+          const val      = isCond
+            ? (col in ls.conds ? ls.conds[col] : undefined)
+            : (col in ls.vars  ? ls.vars[col]  : undefined);
+          const valHtml  = val !== undefined
+            ? formatValue(val)
+            : `<span class="trace-empty">—</span>`;
+          const cls = `trace-cell${isCond ? ' cond-cell' : ''}${changed ? ' flash' : ''}`;
+          return `<span class="${cls}">${valHtml}</span>`;
+        }).join('');
+    }
+
     html += `<div class="src-line${active ? ' active' : ''}" data-line="${num}">` +
       `<span class="src-num">${num}</span>` +
       textHtml +
+      tracePart +
       `</div>`;
   }
+
   sourceLines.innerHTML = html;
 
   if (currentLine > 0) {
@@ -435,11 +633,15 @@ function startDebugger() {
     return;
   }
 
+  // 条件式マップを1回だけ構築
+  buildCondEventMap();
+
   // エディター → ソース表示に切り替え
   editorArea.classList.add('hidden');
   sourceDisplay.classList.remove('hidden');
   btnRun.classList.add('hidden');
   btnReset.classList.remove('hidden');
+  $('btn-trace').classList.remove('hidden');
 
   updateUI();
 }
@@ -447,6 +649,14 @@ function startDebugger() {
 /** デバッグ終了・エディターに戻る */
 function resetDebugger() {
   dbg = null;
+
+  // トレース状態をリセット
+  traceEnabled = false;
+  condEventMap = new Map();
+  sourceDisplay.classList.remove('trace-on');
+  const btnTrace = $('btn-trace');
+  btnTrace.classList.add('hidden');
+  btnTrace.classList.remove('active');
 
   editorArea.classList.remove('hidden');
   sourceDisplay.classList.add('hidden');
@@ -474,6 +684,12 @@ function resetDebugger() {
 
 btnRun.addEventListener('click', startDebugger);
 btnReset.addEventListener('click', resetDebugger);
+
+$('btn-trace').addEventListener('click', () => {
+  traceEnabled = !traceEnabled;
+  $('btn-trace').classList.toggle('active', traceEnabled);
+  updateUI();
+});
 
 $('btn-step-in').addEventListener('click',    () => { dbg?.stepIn();         updateUI(); });
 $('btn-step-over').addEventListener('click',  () => { dbg?.stepOver();       updateUI(); });
@@ -510,6 +726,12 @@ document.addEventListener('keydown', e => {
       e.preventDefault(); dbg.continue();      updateUI(); break;
     case 'r':
       e.preventDefault(); resetDebugger(); break;
+    case 't':
+      e.preventDefault();
+      traceEnabled = !traceEnabled;
+      $('btn-trace').classList.toggle('active', traceEnabled);
+      updateUI();
+      break;
   }
 });
 

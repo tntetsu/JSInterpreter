@@ -116,6 +116,24 @@ The web UI is a two-panel layout:
 | **Call Stack** (right) | Call frames with function name, call site, and argument values (e.g. `fib(5)`) |
 | **Console** (right) | `console.log/warn/error` output up to the current step (rolls back with step-back) |
 
+#### Inline Trace Table
+
+Press **`📊 Trace`** (or key `t`) after clicking Run to open an inline trace table aligned with the source code:
+
+- Each **source line** grows extra columns to the right — one column per variable, plus one column per condition expression (`if`/`while`/`for` tests).
+- The **last recorded value** for each variable at each line is shown; cells update live as you step.
+- **Changed cells flash** yellow (variables) or purple (conditions) on the step that caused the change.
+- The table scrolls horizontally; the line-number column stays fixed.
+
+```
+ #  │ source                    │ arr         │ n │ i │ j │ i<n-1 │ arr[j]>arr[j+1]
+────┼───────────────────────────┼─────────────┼───┼───┼───┼───────┼─────────────────
+  3 │   const n = arr.length;   │ [5,3,8,1,2] │ 5 │   │   │       │
+▶ 4 │   for (let i = 0; …       │ [5,3,8,1,2] │ 5 │ 0 │   │ true  │
+  5 │     for (let j = 0; …     │ [5,3,8,1,2] │ 5 │ 0 │ 0 │       │ true
+  6 │     if (arr[j] > …        │ [3,5,8,1,2] │ 5 │ 0 │ 0 │       │ false
+```
+
 Keyboard shortcuts (same as CLI, active while in debug mode):
 
 | Key | Action |
@@ -128,6 +146,7 @@ Keyboard shortcuts (same as CLI, active while in debug mode):
 | `H` | Human step-back |
 | `c` | Continue |
 | `r` | Reset |
+| `t` | Toggle trace table |
 
 Five built-in example programs are available from a dropdown (fibonacci, factorial, bubble sort, closure, class).
 

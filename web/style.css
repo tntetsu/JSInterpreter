@@ -613,6 +613,169 @@ main {
 .console-debug .console-text { color: var(--muted); }
 
 /* ──────────────────────────────────────────────────────
+   Trace toggle button
+────────────────────────────────────────────────────── */
+.btn-trace {
+  background: var(--overlay);
+  border-color: var(--border);
+  font-size: 12px;
+  padding: 4px 10px;
+  color: var(--subtext0);
+}
+.btn-trace:hover { background: var(--border); color: var(--text); }
+.btn-trace.active {
+  background: rgba(203, 166, 247, 0.15);
+  border-color: var(--purple);
+  color: var(--purple);
+}
+
+/* ──────────────────────────────────────────────────────
+   Trace table (ソースコードと行を揃えたインライン変数表示)
+────────────────────────────────────────────────────── */
+
+/* トレース表ON時はソース表示を横スクロール可能にする */
+.source-display.trace-on {
+  overflow-x: auto;
+  overflow-y: auto;
+}
+
+/* 全行をテーブル行のように揃えるため min-width を内容に合わせる */
+.source-display.trace-on #source-lines {
+  display: table;
+  border-collapse: collapse;
+  min-width: 100%;
+}
+
+.source-display.trace-on .src-line {
+  display: table-row;
+}
+
+/* 各セルを table-cell に */
+.source-display.trace-on .src-num,
+.source-display.trace-on .src-text {
+  display: table-cell;
+  vertical-align: middle;
+}
+
+/* 行番号列: sticky で常に見える */
+.source-display.trace-on .src-num {
+  position: sticky;
+  left: 0;
+  z-index: 3;
+  background: var(--surface2);
+  padding-right: 12px;
+}
+.source-display.trace-on .src-line.active .src-num {
+  background: color-mix(in srgb, var(--active-line-bg) 100%, transparent);
+}
+
+/* ソースコード列: 最小幅を確保し折り返さない */
+.source-display.trace-on .src-text {
+  min-width: 220px;
+  max-width: 380px;
+  white-space: pre;
+  padding-right: 8px;
+}
+
+/* ヘッダー行 */
+.src-trace-hdr {
+  position: sticky;
+  top: 0;
+  z-index: 4;
+  background: var(--surface) !important;
+  border-bottom: 2px solid var(--border) !important;
+  border-left-color: transparent !important;
+}
+
+.src-trace-hdr .src-num,
+.src-trace-hdr .src-text {
+  background: var(--surface) !important;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  padding-top: 4px;
+  padding-bottom: 4px;
+}
+
+/* 縦区切り線 */
+.trace-vsep {
+  display: table-cell;
+  width: 1px;
+  min-width: 1px;
+  background: var(--border);
+  padding: 0;
+}
+
+/* 変数・条件ヘッダーセル */
+.trace-cell-hd {
+  display: table-cell;
+  vertical-align: middle;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--blue);
+  padding: 3px 8px;
+  text-align: center;
+  white-space: nowrap;
+  border-left: 1px solid var(--border);
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.trace-cell-hd.trace-cond-hd {
+  color: var(--purple);
+}
+
+/* 値セル */
+.trace-cell {
+  display: table-cell;
+  vertical-align: middle;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  padding: 1px 8px;
+  text-align: center;
+  white-space: nowrap;
+  border-left: 1px solid var(--overlay);
+  min-width: 60px;
+  max-width: 120px;
+}
+
+/* 値なしセル */
+.trace-empty {
+  color: var(--overlay);
+  font-size: 11px;
+}
+
+/* 値変化アニメーション */
+@keyframes trace-flash {
+  0%   { background: rgba(249, 226, 175, 0.55); color: var(--yellow); }
+  60%  { background: rgba(249, 226, 175, 0.20); }
+  100% { background: transparent; }
+}
+
+.trace-cell.flash {
+  animation: trace-flash 0.9s ease forwards;
+}
+
+/* 条件列は色を変える */
+.trace-cell.cond-cell {
+  border-left: 1px solid color-mix(in srgb, var(--purple) 30%, transparent);
+}
+
+@keyframes trace-flash-cond {
+  0%   { background: rgba(203, 166, 247, 0.45); color: var(--purple); }
+  60%  { background: rgba(203, 166, 247, 0.15); }
+  100% { background: transparent; }
+}
+
+.trace-cell.cond-cell.flash {
+  animation: trace-flash-cond 0.9s ease forwards;
+}
+
+/* ──────────────────────────────────────────────────────
    Scrollbar
 ────────────────────────────────────────────────────── */
 ::-webkit-scrollbar { width: 6px; height: 6px; }

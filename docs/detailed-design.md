@@ -973,17 +973,21 @@ No Node.js shims are required: `createGlobalEnv()` registers only browser-compat
 ┌─────────────────────────────────────────────────────┐
 │ Edit mode                                           │
 │   <textarea> visible, source-display hidden         │
-│   [▶ Run] visible, [⟳ Reset] hidden               │
+│   [▶ Run] visible, [⟳ Reset] / [📊 Trace] hidden  │
 │   All step buttons disabled                         │
 │              │                                      │
 │              │ click [▶ Run]                        │
 │              │   new JSDebugger(source)             │
+│              │   buildCondEventMap() called once    │
 │              ▼                                      │
 │ Debug mode                                          │
 │   source-display visible (line highlighting)        │
-│   [⟳ Reset] visible, [▶ Run] hidden               │
+│   [⟳ Reset] / [📊 Trace] visible, [▶ Run] hidden  │
 │   Step buttons enabled; Back buttons enabled        │
 │   when cursor > 0                                   │
+│              │ ◀─── [📊 Trace] / key 't'           │
+│              │       toggle traceEnabled            │
+│              │       add/remove .trace-on class     │
 │              │                                      │
 │              │ click [⟳ Reset] or key 'r'          │
 │              └──────────────────────────────────────┘
@@ -1051,6 +1055,68 @@ Active when `document.activeElement !== sourceEditor` and `dbg !== null`:
 | `H` (shift+h) | `dbg.humanStepBack()` |
 | `c` | `dbg.continue()` |
 | `r` | `resetDebugger()` |
+| `t` | Toggle `traceEnabled` → `updateUI()` |
+
+### 9.6 Inline Trace Table
+
+#### Overview
+
+When `traceEnabled === true`, `renderSource()` appends variable cells and condition cells to each source-line `<div>`, and adds the `.trace-on` class to `#source-display` to switch it into table layout (`display: table`).
+
+#### Pre-computation: `buildCondEventMap()`
+
+Called once in `startDebugger()`. Iterates the human-step index set returned by `dbg._getHumanIndices()` and identifies **condition exit events** as those satisfying all three:
+
+1. `ev.phase === 'exit'`
+2. `ev.nodeType` is not in `ALWAYS_EXIT` (VariableDeclaration / AssignmentExpression / UpdateExpression / ReturnStatement / ThrowStatement)
+3. `ev.nodeType !== 'CallExpression'`
+
+The condition expression text is extracted by `extractCondText(source, ev.loc, ev.end)`, which slices the source string using the 1-based column fields. Result stored in `condEventMap: Map<traceIndex, condText>`.
+
+#### Per-step State Update: `buildTraceData(cursor)`
+
+Called from `updateUI()`. Performs a single pass over `trace[0..cursor]` and returns:
+
+| Return value | Type | Content |
+|-------------|------|---------|
+| `lineStates` | `Map<line, {vars, conds}>` | Last snapshot for each line |
+| `varNames` | `string[]` | Variable names in order of appearance |
+| `condTexts` | `string[]` | Condition texts in order of appearance |
+| `changedVars` | `Set<string>` | Names changed from step `cursor-1` → `cursor`; conditions keyed as `'cond:' + condText` |
+
+Variable snapshots are obtained via `getMergedVars(event)` (same logic as `renderVariables` default mode). Values are compared with `JSON.stringify`; on serialisation errors the variable is treated as changed.
+
+#### HTML structure (trace ON)
+
+```html
+<!-- Header row -->
+<div class="src-line src-trace-hdr">
+  <span class="src-num"></span>
+  <span class="src-text"></span>
+  <span class="trace-vsep"></span>
+  <span class="trace-cell-hd">n</span>
+  <span class="trace-cell-hd trace-cond-hd">i &lt; n-1</span>
+  ...
+</div>
+
+<!-- Source line -->
+<div class="src-line [active]" data-line="N">
+  <span class="src-num">N</span>
+  <span class="src-text">...</span>
+  <span class="trace-vsep"></span>
+  <span class="trace-cell [flash]">5</span>
+  <span class="trace-cell cond-cell [flash]">true</span>
+  ...
+</div>
+```
+
+#### CSS Architecture
+
+- `.source-display.trace-on` → `overflow-x: auto`; `#source-lines` set to `display: table`
+- `.src-num` → `position: sticky; left: 0` so the line-number column stays visible during horizontal scroll
+- `.src-trace-hdr` → `position: sticky; top: 0` so the header row stays visible during vertical scroll
+- `.trace-cell.flash` → `@keyframes trace-flash` (yellow → transparent, 0.9 s)
+- `.trace-cell.cond-cell.flash` → `@keyframes trace-flash-cond` (purple → transparent, 0.9 s)
 
 ---
 

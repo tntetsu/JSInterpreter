@@ -356,8 +356,8 @@ A browser-based visual debugger. The interpreter core is bundled into `web/inter
 │  Debug mode: highlighted ├────────────────────────┤
 │  source lines            │  Variables             │
 │  + expression highlight  ├────────────────────────┤
-│  [step N / total]        │  Call Stack            │
-│                          ├────────────────────────┤
+│  + trace table (when ON) │  Call Stack            │
+│  [step N / total]        ├────────────────────────┤
 │                          │  Console               │
 └──────────────────────────┴────────────────────────┘
 ```
@@ -374,6 +374,7 @@ A browser-based visual debugger. The interpreter core is bundled into `web/inter
 | Human Back | `H` | humanStepBack() |
 | Continue | `c` | continue() |
 | Reset | `r` | Return to edit mode |
+| 📊 Trace | `t` | Toggle inline trace table |
 
 **Source panel**: The active line is highlighted. When the current event is an expression node, the exact column range is further highlighted in yellow to show which sub-expression is being evaluated.
 
@@ -384,6 +385,14 @@ A browser-based visual debugger. The interpreter core is bundled into `web/inter
 **Call Stack card**: Each frame shows the function name, call site, and **the actual argument values at call time** (e.g. `fib(5)`, `bubbleSort([3,1,2])`). Values are deep-cloned at call time and are unaffected by later mutations.
 
 **Console card**: Displays output from `console.log()` / `console.warn()` / `console.error()`. Only entries produced up to the current cursor position are shown, so stepping back also rolls back console output.
+
+**Inline trace table**: Toggled by the `📊 Trace` button (or key `t`). When ON, the Source panel switches to a table layout in which each source line grows extra columns to its right.
+
+- **Variable columns** (blue header): One column per user-defined variable, added in order of first appearance.
+- **Condition columns** (purple header): Automatically detected test expressions from `if` / `while` / `for` statements; their boolean evaluation results are shown.
+- **Value updates**: Each row retains the last-recorded snapshot for that line; cells update live on every step.
+- **Flash animation**: Cells whose value changed in the last step flash yellow (variables) or purple (conditions).
+- **Horizontal scroll**: The source panel scrolls horizontally when there are many columns; the line-number column is sticky.
 
 **Example programs** (dropdown): fibonacci, factorial, bubble sort, closure, class.
 
