@@ -41,13 +41,14 @@ class JSDebugger {
 
     // ── フェーズ1：記録 ────────────────────────────────────────────────────
     const ast      = parse(source);
-    const env      = createGlobalEnv();
     const recorder = new Recorder();
+    const env      = createGlobalEnv(recorder);   // console を横取り
 
     evaluate(ast, env, recorder, 0, 0);
 
-    this.trace  = recorder.trace;  // TraceEvent[]
-    this.cursor = 0;               // 現在位置（0 始まり）
+    this.trace       = recorder.trace;        // TraceEvent[]
+    this.consoleLogs = recorder.consoleLogs;  // ConsoleLog[]
+    this.cursor = 0;                          // 現在位置（0 始まり）
   }
 
   // ─── 状態参照 ────────────────────────────────────────────────────────────────
@@ -85,6 +86,16 @@ class JSDebugger {
       Object.assign(result, ev.env[i]);
     }
     return result;
+  }
+
+  /**
+   * 現在の cursor までに出力されたコンソールログを返す。
+   * atIndex <= cursor のエントリのみを返すことで、ステップに応じて
+   * 出力が積み上がる様子を再現できる。
+   * @returns {{ atIndex: number, level: string, text: string }[]}
+   */
+  getConsoleOutput() {
+    return this.consoleLogs.filter(log => log.atIndex <= this.cursor);
   }
 
   /** 最後の exit イベントの value（プログラム完了後） */

@@ -89,6 +89,8 @@ const stepCounter    = $('step-counter');
 const currentEventEl = $('current-event');
 const variablesEl    = $('variables');
 const callstackEl    = $('callstack');
+const consoleEl      = $('console-output');
+const consoleCount   = $('console-count');
 const btnRun         = $('btn-run');
 const btnReset       = $('btn-reset');
 const exampleSelect  = $('example-select');
@@ -271,6 +273,37 @@ function renderCallStack(event) {
   callstackEl.innerHTML = html;
 }
 
+/** コンソール出力パネルを描画 */
+function renderConsole() {
+  if (!dbg) {
+    consoleEl.innerHTML   = '<p class="placeholder">—</p>';
+    consoleCount.textContent = '';
+    return;
+  }
+
+  const logs = dbg.getConsoleOutput();
+
+  if (logs.length === 0) {
+    consoleEl.innerHTML      = '<p class="placeholder">—</p>';
+    consoleCount.textContent = '';
+    return;
+  }
+
+  const BADGE = { log: 'log', warn: 'warn', error: 'err', info: 'info', debug: 'dbg' };
+
+  consoleEl.innerHTML = logs.map(log =>
+    `<div class="console-line console-${esc(log.level)}">` +
+      `<span class="console-badge">${BADGE[log.level] ?? log.level}</span>` +
+      `<span class="console-text">${esc(log.text)}</span>` +
+    `</div>`
+  ).join('');
+
+  consoleCount.textContent = `${logs.length} 行`;
+
+  // 最新行にスクロール
+  consoleEl.scrollTop = consoleEl.scrollHeight;
+}
+
 /** すべてのパネルを最新状態に更新 */
 function updateUI() {
   if (!dbg) return;
@@ -284,6 +317,7 @@ function updateUI() {
   renderCurrentEvent(event);
   renderVariables(event);
   renderCallStack(event);
+  renderConsole();
 
   stepCounter.textContent = done
     ? `完了（全 ${total} ステップ）`
@@ -341,6 +375,8 @@ function resetDebugger() {
   currentEventEl.innerHTML     = '<p class="placeholder">▶ Run を押してデバッグを開始</p>';
   variablesEl.innerHTML        = '<p class="placeholder">—</p>';
   callstackEl.innerHTML        = '<p class="placeholder">—</p>';
+  consoleEl.innerHTML          = '<p class="placeholder">—</p>';
+  consoleCount.textContent     = '';
 
   for (const id of [
     'btn-step-in','btn-step-over','btn-step-out','btn-step-back',

@@ -15,10 +15,50 @@ class ThrowSignal   { constructor(v) { this.value = v; } }
  * Recorder — 評価イベントを trace 配列に記録する。
  * null の場合は通常実行（記録なし）。
  */
+/**
+ * console.log 等の引数をプレーンな文字列に変換する。
+ * ネイティブの console と同様、文字列はクォートなしで表示する。
+ */
+function formatLogArg(v) {
+  if (v === null)      return 'null';
+  if (v === undefined) return 'undefined';
+  if (typeof v === 'string') return v;           // クォートなし（console.log の標準動作）
+  if (typeof v !== 'object') return String(v);
+  if (v.__type__ === 'JSFunction') return '[Function (anonymous)]';
+  if (v.__type__ === 'JSClass')    return '[class]';
+  if (v.__type__ === 'JSPromise')  {
+    if (v.status === 'fulfilled') return `Promise { ${formatLogArg(v.value)} }`;
+    if (v.status === 'rejected')  return `Promise { <rejected> ${formatLogArg(v.reason)} }`;
+    return 'Promise { <pending> }';
+  }
+  if (Array.isArray(v)) return '[ ' + v.map(formatLogArg).join(', ') + ' ]';
+  const keys = Object.keys(v).filter(k => !k.startsWith('__'));
+  return '{ ' + keys.map(k => `${k}: ${formatLogArg(v[k])}`).join(', ') + ' }';
+}
+
 class Recorder {
   constructor() {
-    this.trace = [];       // TraceEvent[]
-    this.callStack = [];   // Frame[]  { name, loc }
+    this.trace = [];        // TraceEvent[]
+    this.callStack = [];    // Frame[]  { name, loc }
+    this.consoleLogs = [];  // { atIndex: number, level: string, text: string }
+  }
+
+  /**
+   * console.log 等を横取りして consoleLogs に追記する。
+   * CLI 出力も維持するため、ネイティブ console にも転送する。
+   * @param {'log'|'warn'|'error'|'info'|'debug'} level
+   * @param {any[]} args
+   */
+  captureLog(level, args) {
+    const text = args.map(formatLogArg).join(' ');
+    // 記録：次に push される TraceEvent のインデックスを atIndex とする
+    this.consoleLogs.push({ atIndex: this.trace.length, level, text });
+    // CLI モードでもターミナルに出力する
+    if (level === 'error' || level === 'warn') {
+      console[level](text);
+    } else {
+      console.log(text);
+    }
   }
 
   /**
@@ -123,7 +163,7 @@ function createJSPromiseFromExecutor(executor, recorder, depth, callDepth, loc) 
 
 // ─── 組み込みグローバル ────────────────────────────────────────────────────────
 
-function createGlobalEnv() {
+function createGlobalEnv(recorder = null) {
   const env = new Environment(null);
 
   env.define('undefined', undefined);
@@ -194,7 +234,17 @@ function createGlobalEnv() {
   env.define('TypeError', TypeError);
   env.define('RangeError', RangeError);
   env.define('RegExp', RegExp);
-  env.define('console', console);
+  // recorder が渡されたときは console 出力を横取りして consoleLogs に蓄積する
+  const cap = (level, args) => recorder
+    ? recorder.captureLog(level, args)
+    : console[level](...args);
+  env.define('console', {
+    log:   (...args) => cap('log',   args),
+    warn:  (...args) => cap('warn',  args),
+    error: (...args) => cap('error', args),
+    info:  (...args) => cap('info',  args),
+    debug: (...args) => cap('debug', args),
+  });
 
   return env;
 }
@@ -971,10 +1021,10 @@ function run(source) {
  */
 function record(source) {
   const ast = parse(source);
-  const env = createGlobalEnv();
   const recorder = new Recorder();
+  const env = createGlobalEnv(recorder);   // console を横取り
   const result = evaluate(ast, env, recorder, 0, 0);
-  return { trace: recorder.trace, result };
+  return { trace: recorder.trace, consoleLogs: recorder.consoleLogs, result };
 }
 
 export {
