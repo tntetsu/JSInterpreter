@@ -5,7 +5,8 @@
  * JSDebugger API を呼び出す。
  */
 
-import { JSDebugger } from './interpreter.bundle.js';
+/* JSDebugger は interpreter.bundle.js (IIFE) が window.JSInterpreterLib に展開する */
+const { JSDebugger } = window.JSInterpreterLib;
 
 // ──────────────────────────────────────────────────────────────────────────────
 // サンプルコード
