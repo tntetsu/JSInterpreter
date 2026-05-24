@@ -76,6 +76,21 @@ d.speak();`,
 };
 
 // ──────────────────────────────────────────────────────────────────────────────
+// 組み込みグローバル名（デフォルト表示では除外する）
+// createGlobalEnv() で定義される名前と一致させる
+// ──────────────────────────────────────────────────────────────────────────────
+
+const BUILTIN_NAMES = new Set([
+  'undefined', 'NaN', 'Infinity',
+  'Math', 'JSON', 'Date',
+  'parseInt', 'parseFloat', 'isNaN', 'isFinite',
+  'Number', 'String', 'Boolean', 'Array', 'Object', 'Symbol',
+  'Promise', 'Map', 'Set', 'WeakMap', 'WeakSet',
+  'Error', 'TypeError', 'RangeError', 'RegExp',
+  'console',
+]);
+
+// ──────────────────────────────────────────────────────────────────────────────
 // DOM 参照
 // ──────────────────────────────────────────────────────────────────────────────
 
@@ -250,31 +265,64 @@ function renderVariables(event) {
     return;
   }
 
-  const showAll = scopeAllCb.checked;
-  const frames  = showAll ? event.env : [event.env[0]].filter(Boolean);
+  const frames     = event.env;
+  const globalIdx  = frames.length - 1;
+  const showByScope = scopeAllCb.checked;
 
   let html = '';
-  frames.forEach((frame, fi) => {
-    const keys = Object.keys(frame).filter(k => !isInternal(frame[k]));
-    if (keys.length === 0) return;
 
-    if (showAll) {
+  if (showByScope) {
+    // ── スコープ別表示（チェック時）────────────────────────────────────────
+    // 全フレームをスコープラベル付きで表示（組み込みも含む）
+    frames.forEach((frame, fi) => {
+      const keys = Object.keys(frame).filter(k => !isInternal(frame[k]));
+      if (keys.length === 0) return;
+
       const label = fi === 0
         ? 'Local'
-        : fi === event.env.length - 1
+        : fi === globalIdx
           ? 'Global'
           : `Outer ${fi}`;
       html += `<div class="scope-label">${label}</div>`;
+
+      for (const k of keys) {
+        html +=
+          `<div class="var-row">` +
+            `<span class="var-name">${esc(k)}</span>` +
+            `<span class="var-value">${formatValue(frame[k])}</span>` +
+          `</div>`;
+      }
+    });
+
+  } else {
+    // ── デフォルト表示（チェックなし）─────────────────────────────────────
+    // 全スコープをマージ（内側優先）し、組み込みグローバルを除外する。
+    // 表示対象:
+    //   ① ユーザー定義の変数（関数・クラス以外）— 全スコープから
+    //   ② グローバルスコープの組み込み名は除外
+    //      （Math, console, Array … は通常変更されないため非表示）
+    const merged = new Map();   // key → value（内側スコープが優先）
+
+    for (let fi = 0; fi < frames.length; fi++) {
+      const frame    = frames[fi];
+      const isGlobal = fi === globalIdx;
+
+      for (const k of Object.keys(frame)) {
+        if (merged.has(k))         continue;   // 内側スコープ優先
+        if (isInternal(frame[k])) continue;   // 関数・クラス定義は除外
+        if (isGlobal && BUILTIN_NAMES.has(k)) continue;  // 組み込みは除外
+        merged.set(k, frame[k]);
+      }
     }
 
-    for (const k of keys) {
+    for (const [k, v] of merged) {
       html +=
         `<div class="var-row">` +
           `<span class="var-name">${esc(k)}</span>` +
-          `<span class="var-value">${formatValue(frame[k])}</span>` +
+          `<span class="var-value">${formatValue(v)}</span>` +
         `</div>`;
     }
-  });
+  }
 
   variablesEl.innerHTML = html || '<p class="placeholder">—</p>';
 }
