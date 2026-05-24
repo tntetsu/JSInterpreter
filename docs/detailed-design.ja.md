@@ -59,7 +59,12 @@ src/
 │   ├── interpreter.test.js
 │   ├── debugger.js       JSDebugger
 │   └── debugger.test.js
-└── index.js              エントリポイント
+├── index.js              エントリポイント（CLI）
+web/
+├── index.html            HTML レイアウト — エディターパネル + デバッグパネル
+├── style.css             ダークテーマ（Catppuccin Mocha）
+├── app.js                UI ロジック — interpreter.bundle.js を import
+└── interpreter.bundle.js esbuild バンドル（gitignore 済み、npm run build:web でビルド）
 ```
 
 コードベースは **ES Modules**（`package.json` に `"type": "module"`）を採用し、全ファイルで `import`/`export` 構文を使用します。Jest は `node --experimental-vm-modules` で実行します。
@@ -913,7 +918,103 @@ if (val && val.__type__ === 'JSPromise') {
 
 ---
 
-## 9. テスト設計
+## 9. Web デバッガー UI
+
+**ファイル**: `web/index.html`, `web/style.css`, `web/app.js`
+
+### 9.1 ビルドプロセス
+
+```
+src/interpreter/debugger.js
+  + src/interpreter/interpreter.js
+  + src/interpreter/environment.js
+  + src/parser/parser.js
+  + src/lexer/lexer.js
+  + src/errors.js
+        │
+        │  esbuild --bundle --format=esm
+        ▼
+web/interpreter.bundle.js   （約 99 KB、ESM 形式、gitignore 済み）
+        │
+        │  import { JSDebugger }
+        ▼
+web/app.js  （UI ロジック）
+```
+
+```bash
+npm run build:web   # 単発ビルド
+npm run dev:web     # ウォッチ + 内蔵 HTTP サーバー（localhost:8000）
+```
+
+`createGlobalEnv()` はブラウザ互換のグローバル（`Math`・`JSON`・`console`・`Promise`・`Map`・`Set` 等）のみを登録するため、Node.js シムは不要です。
+
+### 9.2 UI ステートマシン
+
+```
+┌─────────────────────────────────────────────────────┐
+│ 編集モード                                          │
+│   <textarea> 表示、source-display 非表示            │
+│   [▶ Run] 表示、[⟳ Reset] 非表示                  │
+│   ステップボタンすべて無効                          │
+│              │                                      │
+│              │ [▶ Run] クリック                     │
+│              │   new JSDebugger(source)             │
+│              ▼                                      │
+│ デバッグモード                                      │
+│   source-display 表示（現在行ハイライト）           │
+│   [⟳ Reset] 表示、[▶ Run] 非表示                  │
+│   ステップボタン有効；cursor > 0 のとき Back 有効   │
+│              │                                      │
+│              │ [⟳ Reset] クリック または キー 'r'  │
+│              └──────────────────────────────────────┘
+```
+
+### 9.3 パネル構成
+
+| パネル | DOM 要素 | 更新関数 |
+|--------|----------|----------|
+| ソース表示 | `#source-lines` | `renderSource(source, line)` |
+| 現在のステップ | `#current-event` | `renderCurrentEvent(event)` |
+| 変数 | `#variables` | `renderVariables(event)` |
+| コールスタック | `#callstack` | `renderCallStack(event)` |
+| ステップカウンター | `#step-counter` | `updateUI()` |
+
+4 つの描画関数はすべて `updateUI()` 内でまとめて呼び出される。`updateUI()` は各ステップ操作後と「全スコープ」チェックボックス変更時に実行される。
+
+### 9.4 formatValue
+
+`formatValue(v, depth)` はランタイム値を CSS クラス付き HTML に変換する：
+
+| CSS クラス | 対象型 |
+|------------|--------|
+| `.v-num` | number |
+| `.v-str` | string（JSON エスケープ済み） |
+| `.v-bool` | boolean |
+| `.v-null` / `.v-undef` | null / undefined |
+| `.v-fn` | JSFunction・JSClass・ネイティブ関数 |
+| `.v-arr` | 配列（depth 1 まで展開、それ以降は `Array(n)`） |
+| `.v-obj` | プレーンオブジェクト・JSPromise・`__instance__` |
+
+深さガード：depth ≥ 2 でオブジェクト/配列を `{…}` / `Array(n)` に折りたたみ、出力が無制限に増大しないようにする。
+
+### 9.5 キーボードショートカット
+
+`document.activeElement !== sourceEditor` かつ `dbg !== null` のときのみ有効：
+
+| キー | メソッド |
+|------|----------|
+| `n` / Enter | `dbg.stepIn()` |
+| `v` | `dbg.stepOver()` |
+| `o` | `dbg.stepOut()` |
+| `b` | `dbg.stepBack()` |
+| `h`（Shift なし） | `dbg.humanStep()` |
+| `H`（Shift+h） | `dbg.humanStepBack()` |
+| `c` | `dbg.continue()` |
+| `r` | `resetDebugger()` |
+
+---
+
+## 10. テスト設計
 
 ### 9.1 テスト配置
 
@@ -948,7 +1049,7 @@ if (val && val.__type__ === 'JSPromise') {
 
 ---
 
-## 10. 拡張ポイント
+## 11. 拡張ポイント
 
 | 機能 | 拡張箇所 |
 |------|---------|

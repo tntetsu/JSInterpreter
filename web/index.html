@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>JSInterpreter Debugger</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <header>
+    <div class="header-left">
+      <span class="logo">🔍</span>
+      <h1>JS Debugger</h1>
+    </div>
+    <div class="header-right">
+      <select id="example-select" title="サンプルコードを選択">
+        <option value="">— サンプル —</option>
+        <option value="fibonacci">フィボナッチ数列</option>
+        <option value="factorial">階乗（再帰）</option>
+        <option value="bubble-sort">バブルソート</option>
+        <option value="closure">クロージャ</option>
+        <option value="class">クラス</option>
+      </select>
+    </div>
+  </header>
+
+  <main>
+
+    <!-- ════════════════════════════════════════
+         左パネル：ソースコードエディター / 表示
+    ════════════════════════════════════════ -->
+    <section class="pane editor-pane">
+
+      <div class="pane-header">
+        <span class="pane-title">Source</span>
+        <div class="editor-actions">
+          <button id="btn-run" class="btn btn-primary">▶ Run</button>
+          <button id="btn-reset" class="btn btn-secondary hidden">⟳ Reset</button>
+        </div>
+      </div>
+
+      <!-- 編集モード -->
+      <div id="editor-area" class="editor-area">
+        <textarea id="source-editor"
+                  spellcheck="false"
+                  autocomplete="off"
+                  autocorrect="off"
+                  autocapitalize="off"></textarea>
+      </div>
+
+      <!-- デバッグ表示モード -->
+      <div id="source-display" class="source-display hidden">
+        <div id="source-lines"></div>
+      </div>
+
+      <div class="pane-footer">
+        <span id="step-counter" class="step-counter"></span>
+      </div>
+
+    </section>
+
+    <!-- ════════════════════════════════════════
+         右パネル：デバッグ情報
+    ════════════════════════════════════════ -->
+    <section class="pane debug-pane">
+
+      <!-- ステップコントロール -->
+      <div class="controls">
+        <button class="btn ctrl-btn" id="btn-step-in"
+                title="Step In — 次のイベントへ (n / Enter)" disabled>
+          <span class="btn-icon">↓</span>
+          <span class="btn-label">Step In</span>
+          <span class="btn-key">n</span>
+        </button>
+        <button class="btn ctrl-btn" id="btn-step-over"
+                title="Step Over — 現在ノードをスキップ (v)" disabled>
+          <span class="btn-icon">↷</span>
+          <span class="btn-label">Step Over</span>
+          <span class="btn-key">v</span>
+        </button>
+        <button class="btn ctrl-btn" id="btn-step-out"
+                title="Step Out — 関数を抜ける (o)" disabled>
+          <span class="btn-icon">↑</span>
+          <span class="btn-label">Step Out</span>
+          <span class="btn-key">o</span>
+        </button>
+        <button class="btn ctrl-btn" id="btn-step-back"
+                title="Step Back — 1ステップ戻る (b)" disabled>
+          <span class="btn-icon">←</span>
+          <span class="btn-label">Step Back</span>
+          <span class="btn-key">b</span>
+        </button>
+        <button class="btn ctrl-btn btn-human" id="btn-human-step"
+                title="Human Step — 意味のある変化点へ (h)" disabled>
+          <span class="btn-icon">⚡</span>
+          <span class="btn-label">Human Step</span>
+          <span class="btn-key">h</span>
+        </button>
+        <button class="btn ctrl-btn btn-human" id="btn-human-back"
+                title="Human Step Back — 前の変化点へ (H)" disabled>
+          <span class="btn-icon">⚡←</span>
+          <span class="btn-label">Human Back</span>
+          <span class="btn-key">H</span>
+        </button>
+        <button class="btn ctrl-btn btn-continue" id="btn-continue"
+                title="Continue — 末尾まで実行 (c)" disabled>
+          <span class="btn-icon">▶▶</span>
+          <span class="btn-label">Continue</span>
+          <span class="btn-key">c</span>
+        </button>
+      </div>
+
+      <!-- スクロール領域 -->
+      <div class="debug-scroll">
+
+        <!-- 現在のイベント -->
+        <div class="debug-card">
+          <div class="card-header">Current Step</div>
+          <div id="current-event" class="current-event">
+            <p class="placeholder">▶ Run を押してデバッグを開始</p>
+          </div>
+        </div>
+
+        <!-- 変数 -->
+        <div class="debug-card">
+          <div class="card-header">
+            Variables
+            <label class="scope-toggle" title="全スコープを表示">
+              <input type="checkbox" id="scope-all">
+              <span>全スコープ</span>
+            </label>
+          </div>
+          <div id="variables" class="variables">
+            <p class="placeholder">—</p>
+          </div>
+        </div>
+
+        <!-- コールスタック -->
+        <div class="debug-card">
+          <div class="card-header">Call Stack</div>
+          <div id="callstack" class="callstack">
+            <p class="placeholder">—</p>
+          </div>
+        </div>
+
+      </div><!-- /debug-scroll -->
+
+    </section>
+
+  </main>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>

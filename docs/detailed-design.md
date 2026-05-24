@@ -59,7 +59,12 @@ src/
 │   ├── interpreter.test.js
 │   ├── debugger.js       JSDebugger
 │   └── debugger.test.js
-└── index.js              Entry point
+├── index.js              Entry point (CLI)
+web/
+├── index.html            HTML layout — editor pane + debug pane
+├── style.css             Dark theme (Catppuccin Mocha)
+├── app.js                UI logic — imports interpreter.bundle.js
+└── interpreter.bundle.js esbuild bundle of debugger.js (gitignored, built by npm run build:web)
 ```
 
 The project uses **ES Modules** (`"type": "module"` in `package.json`). All files use `import`/`export`. Jest is run with `node --experimental-vm-modules`.
@@ -911,7 +916,104 @@ if (val && val.__type__ === 'JSPromise') {
 
 ---
 
-## 9. Test Design
+## 9. Web Debugger UI
+
+**Files**: `web/index.html`, `web/style.css`, `web/app.js`
+
+### 9.1 Build Process
+
+```
+src/interpreter/debugger.js
+  + src/interpreter/interpreter.js
+  + src/interpreter/environment.js
+  + src/parser/parser.js
+  + src/lexer/lexer.js
+  + src/errors.js
+        │
+        │  esbuild --bundle --format=esm
+        ▼
+web/interpreter.bundle.js   (~99 KB ESM, gitignored)
+        │
+        │  import { JSDebugger }
+        ▼
+web/app.js  (UI logic)
+```
+
+```bash
+npm run build:web   # one-off build
+npm run dev:web     # watch + built-in HTTP server (localhost:8000)
+```
+
+No Node.js shims are required: `createGlobalEnv()` registers only browser-compatible globals (`Math`, `JSON`, `console`, `Promise`, `Map`, `Set`, etc.).
+
+### 9.2 UI State Machine
+
+```
+┌─────────────────────────────────────────────────────┐
+│ Edit mode                                           │
+│   <textarea> visible, source-display hidden         │
+│   [▶ Run] visible, [⟳ Reset] hidden               │
+│   All step buttons disabled                         │
+│              │                                      │
+│              │ click [▶ Run]                        │
+│              │   new JSDebugger(source)             │
+│              ▼                                      │
+│ Debug mode                                          │
+│   source-display visible (line highlighting)        │
+│   [⟳ Reset] visible, [▶ Run] hidden               │
+│   Step buttons enabled; Back buttons enabled        │
+│   when cursor > 0                                   │
+│              │                                      │
+│              │ click [⟳ Reset] or key 'r'          │
+│              └──────────────────────────────────────┘
+```
+
+### 9.3 Panel Architecture
+
+| Panel | DOM element | Updated by |
+|-------|-------------|------------|
+| Source display | `#source-lines` | `renderSource(source, line)` |
+| Current Step | `#current-event` | `renderCurrentEvent(event)` |
+| Variables | `#variables` | `renderVariables(event)` |
+| Call Stack | `#callstack` | `renderCallStack(event)` |
+| Step counter | `#step-counter` | `updateUI()` |
+
+All four render functions are called together inside `updateUI()`, which is invoked after every step operation and after the scope-all checkbox changes.
+
+### 9.4 formatValue
+
+`formatValue(v, depth)` converts runtime values to HTML with CSS class colour-coding:
+
+| CSS class | Types |
+|-----------|-------|
+| `.v-num` | number |
+| `.v-str` | string (JSON-escaped) |
+| `.v-bool` | boolean |
+| `.v-null` / `.v-undef` | null / undefined |
+| `.v-fn` | JSFunction, JSClass, native function |
+| `.v-arr` | Array — shows items up to depth 1, then `Array(n)` |
+| `.v-obj` | plain object / JSPromise / `__instance__` |
+
+Depth guard: at depth ≥ 2 objects/arrays are collapsed to `{…}` / `Array(n)` to prevent unbounded output.
+
+### 9.5 Keyboard Shortcuts
+
+Active when `document.activeElement !== sourceEditor` and `dbg !== null`:
+
+| Key | Method |
+|-----|--------|
+| `n` / Enter | `dbg.stepIn()` |
+| `v` | `dbg.stepOver()` |
+| `o` | `dbg.stepOut()` |
+| `b` | `dbg.stepBack()` |
+| `h` (no shift) | `dbg.humanStep()` |
+| `H` (shift+h) | `dbg.humanStepBack()` |
+| `c` | `dbg.continue()` |
+| `r` | `resetDebugger()` |
+
+---
+
+## 10. Test Design
 
 ### 9.1 Test File Layout
 
@@ -946,7 +1048,7 @@ if (val && val.__type__ === 'JSPromise') {
 
 ---
 
-## 10. Extension Points
+## 11. Extension Points
 
 | Feature | Where to extend |
 |---------|----------------|

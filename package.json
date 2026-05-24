@@ -7,9 +7,12 @@
   "scripts": {
     "test": "node --experimental-vm-modules node_modules/.bin/jest",
     "test:watch": "node --experimental-vm-modules node_modules/.bin/jest --watch",
-    "start": "node src/index.js"
+    "start": "node src/index.js",
+    "build:web": "esbuild src/interpreter/debugger.js --bundle --format=esm --outfile=web/interpreter.bundle.js",
+    "dev:web": "esbuild src/interpreter/debugger.js --bundle --format=esm --outfile=web/interpreter.bundle.js --servedir=web --watch"
   },
   "devDependencies": {
+    "esbuild": "^0.21.0",
     "jest": "^29.0.0"
   },
   "jest": {

@@ -14,6 +14,7 @@ A JavaScript interpreter written in JavaScript. Supports ES6+ syntax including a
 - **Human-friendly step** — `h`/`H` commands skip intermediate sub-expressions and surface only meaningful change points (assignments, conditions, loop iterations, function calls)
 - **Programmatic API** — embed `JSDebugger` into IDE integrations or external tools
 - **Interactive CLI debugger** — step through code directly in the terminal
+- **Web Debugger UI** — browser-based visual debugger with source highlighting, variables panel, and call stack panel
 - **ES6+ syntax** — arrow functions, classes, destructuring, template literals, and more
 
 ## Installation
@@ -92,6 +93,42 @@ The `h` command shows a compact one-line summary instead of the raw AST event:
 [代入  ] line   8  arr[j] = arr[j + 1];           →  1
 [更新  ] line   5  for (let j = 0; ...)           →  0
 ```
+
+### Web Debugger UI
+
+```bash
+# Build the browser bundle (once, or after changing interpreter source)
+npm run build:web
+
+# Start dev server — rebuilds automatically on source change
+npm run dev:web
+# → Open http://localhost:8000
+```
+
+The web UI is a two-panel layout:
+
+| Panel | Content |
+|-------|---------|
+| **Source** (left) | Code editor in edit mode; line-highlighted read-only view in debug mode |
+| **Controls** (right, top) | Step In / Step Over / Step Out / Step Back / Human Step / Human Back / Continue |
+| **Current Step** (right) | phase, nodeType, line:col, depth, callDepth, evaluated value |
+| **Variables** (right) | Local scope; toggle to show full scope chain |
+| **Call Stack** (right) | Ordered list of call frames |
+
+Keyboard shortcuts (same as CLI, active while in debug mode):
+
+| Key | Action |
+|-----|--------|
+| `n` / Enter | Step-in |
+| `v` | Step-over |
+| `o` | Step-out |
+| `b` | Step-back |
+| `h` | Human step |
+| `H` | Human step-back |
+| `c` | Continue |
+| `r` | Reset |
+
+Five built-in example programs are available from a dropdown (fibonacci, factorial, bubble sort, closure, class).
 
 ## Programmatic API
 

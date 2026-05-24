@@ -48,6 +48,7 @@ User (developer / learner)
 | F-10 | File execution mode | Required |
 | F-11 | Plain REPL (non-debug) | Required |
 | F-12 | Human-friendly step | Required |
+| F-13 | Web Debugger UI | Required |
 
 ---
 
@@ -333,6 +334,48 @@ Launch: node src/index.js
 ```
 
 Interactively evaluates expressions and statements, maintaining environment state across inputs. Exit with `.exit` or Ctrl+D.
+
+### 6.4 Web Debugger UI (F-13)
+
+```
+Build:  npm run build:web
+Launch: npm run dev:web   → http://localhost:8000
+```
+
+A browser-based visual debugger. The interpreter core is bundled into `web/interpreter.bundle.js` by esbuild; no server-side runtime is required during debugging.
+
+**Layout:**
+
+```
+┌──────────────────────────┬────────────────────────┐
+│  Source (left 55%)       │  Controls (right 45%)  │
+│                          ├────────────────────────┤
+│  Edit mode: <textarea>   │  Current Step          │
+│  Debug mode: highlighted ├────────────────────────┤
+│  source lines            │  Variables             │
+│                          ├────────────────────────┤
+│  [step N / total]        │  Call Stack            │
+└──────────────────────────┴────────────────────────┘
+```
+
+**Controls and keyboard shortcuts:**
+
+| Button | Key | Action |
+|--------|-----|--------|
+| Step In | `n` / Enter | stepIn() |
+| Step Over | `v` | stepOver() |
+| Step Out | `o` | stepOut() |
+| Step Back | `b` | stepBack() |
+| Human Step | `h` | humanStep() |
+| Human Back | `H` | humanStepBack() |
+| Continue | `c` | continue() |
+| Reset | `r` | Return to edit mode |
+
+**Current Step card** shows: phase (enter/exit), nodeType, line:col, depth, callDepth, and evaluated value (exit events only).
+
+**Variables card**: local scope by default; "全スコープ" checkbox expands to the full scope chain, filtered to exclude internal function/class objects.
+
+**Example programs** (dropdown): fibonacci, factorial, bubble sort, closure, class.
 
 ---
 
