@@ -939,7 +939,7 @@ if (val && val.__type__ === 'JSPromise') {
 
 ---
 
-## 9. Web デバッガー UI
+## 9. CodeTrace — 実行可視化ツール
 
 **ファイル**: `web/index.html`, `web/style.css`, `web/app.js`
 

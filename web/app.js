@@ -1,5 +1,5 @@
 /**
- * app.js — JSInterpreter Web Debugger UI
+ * app.js — CodeTrace UI
  *
  * interpreter.bundle.js (esbuild でビルド済み) を import して
  * JSDebugger API を呼び出す。

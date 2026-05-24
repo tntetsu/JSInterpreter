@@ -48,7 +48,7 @@ User (developer / learner)
 | F-10 | File execution mode | Required |
 | F-11 | Plain REPL (non-debug) | Required |
 | F-12 | Human-friendly step | Required |
-| F-13 | Web Debugger UI | Required |
+| F-13 | CodeTrace (Execution Visualizer) | Required |
 
 ---
 
@@ -337,14 +337,14 @@ Launch: node src/index.js
 
 Interactively evaluates expressions and statements, maintaining environment state across inputs. Exit with `.exit` or Ctrl+D.
 
-### 6.4 Web Debugger UI (F-13)
+### 6.4 CodeTrace — Execution Visualizer (F-13)
 
 ```
 Build:  npm run build:web
 Launch: npm run dev:web   → http://localhost:8000
 ```
 
-A browser-based visual debugger. The interpreter core is bundled into `web/interpreter.bundle.js` by esbuild; no server-side runtime is required during debugging.
+A browser-based execution visualizer aimed at learners. The interpreter core is bundled into `web/interpreter.bundle.js` by esbuild; no server-side runtime is required.
 
 **Layout:**
 

@@ -14,7 +14,7 @@ A JavaScript interpreter written in JavaScript. Supports ES6+ syntax including a
 - **Human-friendly step** — `h`/`H` commands skip intermediate sub-expressions and surface only meaningful change points (assignments, conditions, loop iterations, function calls)
 - **Programmatic API** — embed `JSDebugger` into IDE integrations or external tools
 - **Interactive CLI debugger** — step through code directly in the terminal
-- **Web Debugger UI** — browser-based visual debugger with source highlighting, variables panel, and call stack panel
+- **CodeTrace** — browser-based execution visualizer for learners: step through code and watch variables and condition expressions change in real time
 - **ES6+ syntax** — arrow functions, classes, destructuring, template literals, and more
 
 ## Installation
@@ -94,7 +94,7 @@ The `h` command shows a compact one-line summary instead of the raw AST event:
 [更新  ] line   5  for (let j = 0; ...)           →  0
 ```
 
-### Web Debugger UI
+### CodeTrace — Execution Visualizer
 
 ```bash
 # Build the browser bundle (once, or after changing interpreter source)

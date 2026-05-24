@@ -937,7 +937,7 @@ if (val && val.__type__ === 'JSPromise') {
 
 ---
 
-## 9. Web Debugger UI
+## 9. CodeTrace — Execution Visualizer
 
 **Files**: `web/index.html`, `web/style.css`, `web/app.js`
 
