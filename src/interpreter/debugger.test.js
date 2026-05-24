@@ -215,6 +215,80 @@ describe('JSDebugger', () => {
       expect(vars).toHaveProperty('x', 1);
       // y は env スナップショットに含まれていないか undefined のはず
     });
+
+    test('ディープクローン: stepBack でオブジェクトの内部変更が正しく戻る', () => {
+      const dbg = new JSDebugger(
+        'let obj = { x: 1 };\nobj.x = 2;\nobj.x = 3;'
+      );
+
+      // obj.x = 3 の AssignmentExpression exit まで進む
+      while (!dbg.isDone()) {
+        const ev = dbg.getCurrentEvent();
+        if (ev.nodeType === 'AssignmentExpression' && ev.phase === 'exit' && ev.value === 3) break;
+        dbg.stepIn();
+      }
+      expect(dbg.getVariables('all').obj).toEqual({ x: 3 });
+
+      // obj.x = 2 の AssignmentExpression exit まで戻る
+      while (dbg.cursor > 0) {
+        dbg.stepBack();
+        const ev = dbg.getCurrentEvent();
+        if (ev.nodeType === 'AssignmentExpression' && ev.phase === 'exit' && ev.value === 2) break;
+      }
+      expect(dbg.getVariables('all').obj).toEqual({ x: 2 });
+
+      // VariableDeclaration exit（obj = { x: 1 } の直後）まで戻る
+      while (dbg.cursor > 0) {
+        dbg.stepBack();
+        const ev = dbg.getCurrentEvent();
+        if (ev.nodeType === 'VariableDeclaration' && ev.phase === 'exit') break;
+      }
+      expect(dbg.getVariables('all').obj).toEqual({ x: 1 });
+    });
+
+    test('ディープクローン: stepBack で配列の内部変更が正しく戻る', () => {
+      const dbg = new JSDebugger(
+        'let arr = [1, 2, 3];\narr[0] = 99;'
+      );
+
+      // arr[0] = 99 の AssignmentExpression exit まで進む
+      while (!dbg.isDone()) {
+        const ev = dbg.getCurrentEvent();
+        if (ev.nodeType === 'AssignmentExpression' && ev.phase === 'exit' && ev.value === 99) break;
+        dbg.stepIn();
+      }
+      expect(dbg.getVariables('all').arr[0]).toBe(99);
+
+      // VariableDeclaration exit（arr = [1,2,3] の直後）まで戻る
+      while (dbg.cursor > 0) {
+        dbg.stepBack();
+        const ev = dbg.getCurrentEvent();
+        if (ev.nodeType === 'VariableDeclaration' && ev.phase === 'exit') break;
+      }
+      expect(dbg.getVariables('all').arr[0]).toBe(1);
+    });
+
+    test('ディープクローン: ネストしたオブジェクトも正しく戻る', () => {
+      const dbg = new JSDebugger(
+        'let obj = { inner: { v: 0 } };\nobj.inner.v = 42;'
+      );
+
+      // obj.inner.v = 42 の AssignmentExpression exit まで進む
+      while (!dbg.isDone()) {
+        const ev = dbg.getCurrentEvent();
+        if (ev.nodeType === 'AssignmentExpression' && ev.phase === 'exit' && ev.value === 42) break;
+        dbg.stepIn();
+      }
+      expect(dbg.getVariables('all').obj.inner.v).toBe(42);
+
+      // VariableDeclaration exit まで戻る
+      while (dbg.cursor > 0) {
+        dbg.stepBack();
+        const ev = dbg.getCurrentEvent();
+        if (ev.nodeType === 'VariableDeclaration' && ev.phase === 'exit') break;
+      }
+      expect(dbg.getVariables('all').obj.inner.v).toBe(0);
+    });
   });
 
   // ── getVariables ────────────────────────────────────────────────────────────
