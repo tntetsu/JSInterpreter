@@ -2,10 +2,11 @@
   "name": "js-interpreter",
   "version": "1.0.0",
   "description": "JavaScript interpreter with step execution API",
+  "type": "module",
   "main": "src/index.js",
   "scripts": {
-    "test": "jest --testPathPattern='\\.(test)\\.js$'",
-    "test:watch": "jest --watch",
+    "test": "node --experimental-vm-modules node_modules/.bin/jest",
+    "test:watch": "node --experimental-vm-modules node_modules/.bin/jest --watch",
     "start": "node src/index.js"
   },
   "devDependencies": {

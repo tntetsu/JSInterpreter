@@ -1,17 +1,5 @@
-'use strict';
-
-const { Lexer, TokenType } = require('../lexer/lexer');
-
-// ─── エラー ────────────────────────────────────────────────────────────────────
-
-class ParseError extends Error {
-  constructor(message, line, column) {
-    super(`[Parser] ${line}:${column}: ${message}`);
-    this.name = 'ParseError';
-    this.line = line;
-    this.column = column;
-  }
-}
+import { Lexer, TokenType } from '../lexer/lexer.js';
+import { ParseError } from '../errors.js';
 
 // ─── Parser ────────────────────────────────────────────────────────────────────
 
@@ -1072,4 +1060,4 @@ function parse(source) {
   return new Parser(tokens).parse();
 }
 
-module.exports = { Parser, ParseError, parse };
+export { Parser, ParseError, parse };

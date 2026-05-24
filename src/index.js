@@ -1,14 +1,12 @@
 #!/usr/bin/env node
-'use strict';
 
-const fs      = require('fs');
-const path    = require('path');
-const readline = require('readline');
-
-const { LexError }    = require('./lexer/lexer');
-const { ParseError }  = require('./parser/parser');
-const { RuntimeError, run } = require('./interpreter/interpreter');
-const { JSDebugger }  = require('./interpreter/debugger');
+import fs       from 'fs';
+import path     from 'path';
+import readline from 'readline';
+import { LexError }    from './lexer/lexer.js';
+import { ParseError }  from './parser/parser.js';
+import { RuntimeError, run } from './interpreter/interpreter.js';
+import { JSDebugger }  from './interpreter/debugger.js';
 
 // ─── 共通ユーティリティ ────────────────────────────────────────────────────────
 
@@ -252,8 +250,8 @@ async function runREPL() {
   console.log('JS インタープリター REPL  （終了: .exit または Ctrl+D）');
 
   // グローバル環境を維持
-  const { createGlobalEnv, evaluate } = require('./interpreter/interpreter');
-  const { parse } = require('./parser/parser');
+  const { createGlobalEnv, evaluate, ReturnSignal } = await import('./interpreter/interpreter.js');
+  const { parse } = await import('./parser/parser.js');
   const replEnv = createGlobalEnv();
 
   rl.prompt();
@@ -267,8 +265,7 @@ async function runREPL() {
       const ast = parse(src);
       const result = evaluate(ast, replEnv, null, 0, 0);
       if (result !== undefined && result !== null) {
-        const { ReturnSignal } = require('./interpreter/interpreter');
-        if (!(result instanceof ReturnSignal)) {
+          if (!(result instanceof ReturnSignal)) {
           console.log(formatValue(result));
         }
       }

@@ -1,6 +1,4 @@
-'use strict';
-
-const { parse, ParseError } = require('./parser');
+import { parse, ParseError } from './parser.js';
 
 describe('Parser', () => {
   // ── 基本的なリテラル ──────────────────────────────────────────────────────────

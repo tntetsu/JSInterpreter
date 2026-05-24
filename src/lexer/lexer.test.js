@@ -1,6 +1,4 @@
-'use strict';
-
-const { Lexer, TokenType, LexError } = require('./lexer');
+import { Lexer, TokenType, LexError } from './lexer.js';
 
 function lex(src) {
   return new Lexer(src).tokenize();

@@ -1,7 +1,5 @@
-'use strict';
-
-const { parse }       = require('../parser/parser');
-const { evaluate, createGlobalEnv, Recorder } = require('./interpreter');
+import { parse }       from '../parser/parser.js';
+import { evaluate, createGlobalEnv, Recorder } from './interpreter.js';
 
 /**
  * JSDebugger — ステップ実行 API
@@ -356,4 +354,4 @@ class JSDebugger {
   }
 }
 
-module.exports = { JSDebugger };
+export { JSDebugger };

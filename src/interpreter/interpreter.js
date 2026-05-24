@@ -1,16 +1,6 @@
-'use strict';
-
-const { Environment } = require('./environment');
-
-// ─── エラー ────────────────────────────────────────────────────────────────────
-
-class RuntimeError extends Error {
-  constructor(message, loc) {
-    super(`[Runtime] ${loc ? `${loc.line}:${loc.column}: ` : ''}${message}`);
-    this.name = 'RuntimeError';
-    this.loc = loc || null;
-  }
-}
+import { Environment } from './environment.js';
+import { RuntimeError } from '../errors.js';
+import { parse } from '../parser/parser.js';
 
 // ─── 制御フロー用シグナル ──────────────────────────────────────────────────────
 
@@ -968,7 +958,6 @@ function bindParams(params, args, env, recorder, depth, callDepth) {
  * ソースコードを実行して最終値を返す（通常モード）。
  */
 function run(source) {
-  const { parse } = require('../parser/parser');
   const ast = parse(source);
   const env = createGlobalEnv();
   const result = evaluate(ast, env, null, 0, 0);
@@ -981,7 +970,6 @@ function run(source) {
  * ソースコードを実行してトレースを返す（デバッグモード）。
  */
 function record(source) {
-  const { parse } = require('../parser/parser');
   const ast = parse(source);
   const env = createGlobalEnv();
   const recorder = new Recorder();
@@ -989,7 +977,7 @@ function record(source) {
   return { trace: recorder.trace, result };
 }
 
-module.exports = {
+export {
   evaluate, run, record,
   Recorder, RuntimeError,
   ReturnSignal, BreakSignal, ContinueSignal, ThrowSignal,

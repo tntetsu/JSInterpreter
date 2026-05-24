@@ -1,4 +1,4 @@
-'use strict';
+import { RuntimeError } from '../errors.js';
 
 /**
  * deepClone — デバッガースナップショット用のディープクローン
@@ -89,7 +89,6 @@ class Environment {
   get(name, loc) {
     if (this.bindings.has(name)) return this.bindings.get(name);
     if (this.parent) return this.parent.get(name, loc);
-    const { RuntimeError } = require('./interpreter');
     throw new RuntimeError(`未定義の変数: '${name}'`, loc || { line: 0, column: 0 });
   }
 
@@ -105,7 +104,6 @@ class Environment {
       return value;
     }
     if (this.parent) return this.parent.set(name, value, loc);
-    const { RuntimeError } = require('./interpreter');
     throw new RuntimeError(`未定義の変数への代入: '${name}'`, loc || { line: 0, column: 0 });
   }
 
@@ -133,4 +131,4 @@ class Environment {
   }
 }
 
-module.exports = { Environment, deepClone };
+export { Environment, deepClone };

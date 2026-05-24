@@ -46,20 +46,23 @@
 
 ```
 src/
+├── errors.js             LexError, ParseError, RuntimeError  （共通 — 循環依存を解消）
 ├── lexer/
-│   ├── lexer.js          Lexer, Token, TokenType, LexError
+│   ├── lexer.js          Lexer, Token, TokenType
 │   └── lexer.test.js
 ├── parser/
-│   ├── parser.js         Parser, ParseError, parse()
+│   ├── parser.js         Parser, parse()
 │   └── parser.test.js
 ├── interpreter/
 │   ├── environment.js    Environment, deepClone
-│   ├── interpreter.js    evaluate(), run(), record(), Recorder, RuntimeError
+│   ├── interpreter.js    evaluate(), run(), record(), Recorder
 │   ├── interpreter.test.js
 │   ├── debugger.js       JSDebugger
 │   └── debugger.test.js
 └── index.js              エントリポイント
 ```
+
+コードベースは **ES Modules**（`package.json` に `"type": "module"`）を採用し、全ファイルで `import`/`export` 構文を使用します。Jest は `node --experimental-vm-modules` で実行します。
 
 ---
 

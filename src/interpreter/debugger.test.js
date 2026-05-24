@@ -1,6 +1,4 @@
-'use strict';
-
-const { JSDebugger } = require('./debugger');
+import { JSDebugger } from './debugger.js';
 
 // ヘルパー：cursor を特定ノード型 & フェーズまで進める
 function advanceTo(dbg, nodeType, phase = 'enter') {

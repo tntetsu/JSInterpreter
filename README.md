@@ -96,7 +96,7 @@ The `h` command shows a compact one-line summary instead of the raw AST event:
 ## Programmatic API
 
 ```javascript
-const { JSDebugger } = require('./src/interpreter/debugger');
+import { JSDebugger } from './src/interpreter/debugger.js';
 
 const dbg = new JSDebugger(`
   function fib(n) {
@@ -196,7 +196,12 @@ evaluate()     AST → runtime values + records all events in Recorder
   ▼
 JSDebugger     step control via index manipulation on trace[]
                (src/interpreter/debugger.js)
+
+src/errors.js  shared error classes (LexError, ParseError, RuntimeError)
+               imported by all pipeline stages — breaks circular dependencies
 ```
+
+The codebase uses **ES Modules** (`"type": "module"` in package.json). All files use `import`/`export` syntax.
 
 Execution is split into two phases:
 

@@ -46,20 +46,23 @@ Source code (string)
 
 ```
 src/
+├── errors.js             LexError, ParseError, RuntimeError  (shared — breaks circular deps)
 ├── lexer/
-│   ├── lexer.js          Lexer, Token, TokenType, LexError
+│   ├── lexer.js          Lexer, Token, TokenType
 │   └── lexer.test.js
 ├── parser/
-│   ├── parser.js         Parser, ParseError, parse()
+│   ├── parser.js         Parser, parse()
 │   └── parser.test.js
 ├── interpreter/
 │   ├── environment.js    Environment, deepClone
-│   ├── interpreter.js    evaluate(), run(), record(), Recorder, RuntimeError
+│   ├── interpreter.js    evaluate(), run(), record(), Recorder
 │   ├── interpreter.test.js
 │   ├── debugger.js       JSDebugger
 │   └── debugger.test.js
 └── index.js              Entry point
 ```
+
+The project uses **ES Modules** (`"type": "module"` in `package.json`). All files use `import`/`export`. Jest is run with `node --experimental-vm-modules`.
 
 ---
 

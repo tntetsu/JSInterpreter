@@ -1,15 +1,4 @@
-'use strict';
-
-// ─── エラー ────────────────────────────────────────────────────────────────────
-
-class LexError extends Error {
-  constructor(message, line, column) {
-    super(`[Lexer] ${line}:${column}: ${message}`);
-    this.name = 'LexError';
-    this.line = line;
-    this.column = column;
-  }
-}
+import { LexError } from '../errors.js';
 
 // ─── TokenType ─────────────────────────────────────────────────────────────────
 
@@ -540,4 +529,4 @@ class Lexer {
   isAlphaNumeric(c){ return this.isAlpha(c) || this.isDigit(c); }
 }
 
-module.exports = { Lexer, Token, TokenType, LexError };
+export { Lexer, Token, TokenType, LexError };

@@ -1,6 +1,4 @@
-'use strict';
-
-const { run, record } = require('./interpreter');
+import { run, record } from './interpreter.js';
 
 describe('Interpreter', () => {
   // ── 算術・リテラル ────────────────────────────────────────────────────────────
