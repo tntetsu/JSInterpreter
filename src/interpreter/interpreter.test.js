@@ -261,4 +261,136 @@ describe('Interpreter', () => {
       expect(vdExit.env[0]).toHaveProperty('x', 5);
     });
   });
+
+  // ── async/await ──────────────────────────────────────────────────────────────
+  describe('async/await', () => {
+    test('async 関数は fulfilled JSPromise を返す', () => {
+      const result = run('async function f() { return 42; } f();');
+      expect(result.__type__).toBe('JSPromise');
+      expect(result.status).toBe('fulfilled');
+      expect(result.value).toBe(42);
+    });
+
+    test('async アロー関数（式本体）', () => {
+      const result = run('const f = async x => x * 2; f(5);');
+      expect(result.__type__).toBe('JSPromise');
+      expect(result.status).toBe('fulfilled');
+      expect(result.value).toBe(10);
+    });
+
+    test('async アロー関数（括弧あり・複数引数）', () => {
+      const result = run('const f = async (a, b) => a + b; f(3, 4);');
+      expect(result.status).toBe('fulfilled');
+      expect(result.value).toBe(7);
+    });
+
+    test('async アロー関数（引数なし）', () => {
+      const result = run('const f = async () => 99; f();');
+      expect(result.status).toBe('fulfilled');
+      expect(result.value).toBe(99);
+    });
+
+    test('async 関数内の throw は rejected JSPromise', () => {
+      const result = run('async function f() { throw new Error("oops"); } f();');
+      expect(result.__type__).toBe('JSPromise');
+      expect(result.status).toBe('rejected');
+      expect(result.reason.message).toBe('oops');
+    });
+
+    test('await で JSPromise を同期解決する', () => {
+      const result = run(`
+        async function f() {
+          const x = await Promise.resolve(10);
+          return x * 2;
+        }
+        f();
+      `);
+      expect(result.status).toBe('fulfilled');
+      expect(result.value).toBe(20);
+    });
+
+    test('await rejected Promise は catch できる', () => {
+      const result = run(`
+        async function f() {
+          try {
+            await Promise.reject(new Error('fail'));
+          } catch (e) {
+            return 'caught: ' + e.message;
+          }
+        }
+        f();
+      `);
+      expect(result.status).toBe('fulfilled');
+      expect(result.value).toBe('caught: fail');
+    });
+
+    test('async/await チェーン', () => {
+      const result = run(`
+        async function a() { return 1; }
+        async function b() { return await a() + 1; }
+        async function c() { return await b() + 1; }
+        c();
+      `);
+      expect(result.status).toBe('fulfilled');
+      expect(result.value).toBe(3);
+    });
+
+    test('Promise.resolve() で JSPromise を作る', () => {
+      const result = run('Promise.resolve(42);');
+      expect(result.__type__).toBe('JSPromise');
+      expect(result.status).toBe('fulfilled');
+      expect(result.value).toBe(42);
+    });
+
+    test('Promise.reject() で rejected JSPromise を作る', () => {
+      const result = run('Promise.reject("error");');
+      expect(result.__type__).toBe('JSPromise');
+      expect(result.status).toBe('rejected');
+      expect(result.reason).toBe('error');
+    });
+
+    test('new Promise(executor) で JSPromise を作る', () => {
+      const result = run('new Promise((resolve) => { resolve(42); });');
+      expect(result.__type__).toBe('JSPromise');
+      expect(result.status).toBe('fulfilled');
+      expect(result.value).toBe(42);
+    });
+
+    test('new Promise で reject する', () => {
+      const result = run('new Promise((_, reject) => { reject("nope"); });');
+      expect(result.status).toBe('rejected');
+      expect(result.reason).toBe('nope');
+    });
+
+    test('Promise.all で複数の Promise を解決する', () => {
+      const result = run(`
+        Promise.all([Promise.resolve(1), Promise.resolve(2), Promise.resolve(3)]);
+      `);
+      expect(result.status).toBe('fulfilled');
+      expect(result.value).toEqual([1, 2, 3]);
+    });
+
+    test('Promise.all でひとつでも reject されると rejected', () => {
+      const result = run(`
+        Promise.all([Promise.resolve(1), Promise.reject('bad'), Promise.resolve(3)]);
+      `);
+      expect(result.status).toBe('rejected');
+      expect(result.reason).toBe('bad');
+    });
+
+    test('Promise.allSettled は全 Promise の結果を返す', () => {
+      const result = run(`
+        Promise.allSettled([Promise.resolve(1), Promise.reject('bad')]);
+      `);
+      expect(result.status).toBe('fulfilled');
+      expect(result.value[0]).toEqual({ status: 'fulfilled', value: 1 });
+      expect(result.value[1]).toEqual({ status: 'rejected', reason: 'bad' });
+    });
+
+    test('await 平値はそのまま返る', () => {
+      const result = run('async function f() { return await 42; } f();');
+      expect(result.status).toBe('fulfilled');
+      expect(result.value).toBe(42);
+    });
+  });
 });

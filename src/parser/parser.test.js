@@ -236,4 +236,63 @@ describe('Parser', () => {
       expect(() => parse('let ;')).toThrow(ParseError);
     });
   });
+
+  // ── async/await ──────────────────────────────────────────────────────────────
+  describe('async/await', () => {
+    test('async function 宣言をパースする', () => {
+      const ast = parse('async function f() { return 1; }');
+      expect(ast.body[0].type).toBe('FunctionDeclaration');
+      expect(ast.body[0].async).toBe(true);
+      expect(ast.body[0].id.name).toBe('f');
+    });
+
+    test('async 関数式をパースする', () => {
+      const ast = parse('const f = async function() { return 1; };');
+      const fn = ast.body[0].declarations[0].init;
+      expect(fn.type).toBe('FunctionExpression');
+      expect(fn.async).toBe(true);
+    });
+
+    test('async アロー関数（単一引数）をパースする', () => {
+      const ast = parse('const f = async x => x + 1;');
+      const fn = ast.body[0].declarations[0].init;
+      expect(fn.type).toBe('ArrowFunctionExpression');
+      expect(fn.async).toBe(true);
+      expect(fn.params[0].name).toBe('x');
+    });
+
+    test('async アロー関数（括弧あり複数引数）をパースする', () => {
+      const ast = parse('const f = async (x, y) => x + y;');
+      const fn = ast.body[0].declarations[0].init;
+      expect(fn.async).toBe(true);
+      expect(fn.params.length).toBe(2);
+    });
+
+    test('async アロー関数（引数なし）をパースする', () => {
+      const ast = parse('const f = async () => 42;');
+      const fn = ast.body[0].declarations[0].init;
+      expect(fn.async).toBe(true);
+      expect(fn.params.length).toBe(0);
+    });
+
+    test('await 式を AwaitExpression ノードとしてパースする', () => {
+      const ast = parse('async function f() { await somePromise; }');
+      const body = ast.body[0].body.body;
+      expect(body[0].expression.type).toBe('AwaitExpression');
+      expect(body[0].expression.argument.name).toBe('somePromise');
+    });
+
+    test('await 式（代入）をパースする', () => {
+      const ast = parse('async function f() { const x = await Promise.resolve(1); }');
+      const decl = ast.body[0].body.body[0].declarations[0];
+      expect(decl.init.type).toBe('AwaitExpression');
+    });
+
+    test('async クラスメソッドをパースする', () => {
+      const ast = parse('class C { async method() { return 1; } }');
+      const method = ast.body[0].body.body[0];
+      expect(method.value.async).toBe(true);
+      expect(method.key.name).toBe('method');
+    });
+  });
 });

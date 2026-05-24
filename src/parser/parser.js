@@ -135,6 +135,13 @@ class Parser {
       this.consumeSemicolon();
       return { type: 'DebuggerStatement', loc: l };
     }
+    // async function 宣言
+    if (this.check(TokenType.ASYNC) && this.tokens[this.current + 1]?.type === TokenType.FUNCTION &&
+        !this.tokens[this.current + 1]?.wasNewlineBefore) {
+      const asyncTok = this.advance(); // async
+      this.advance(); // function
+      return this.parseFunctionDeclaration(asyncTok, true);
+    }
     if (this.check(TokenType.LBRACE)) {
       return this.parseBlock();
     }
@@ -163,9 +170,8 @@ class Parser {
     return { type: 'VariableDeclaration', kind, declarations, loc };
   }
 
-  parseFunctionDeclaration(funcToken) {
+  parseFunctionDeclaration(funcToken, isAsync = false) {
     const loc = this.loc(funcToken);
-    const isAsync = false; // async は後で対応
     const isStar  = this.match(TokenType.STAR);
     let name = null;
     if (this.checkIdentifierName()) {
@@ -385,6 +391,15 @@ class Parser {
       }
     }
 
+    let isAsync = false;
+    if (this.check(TokenType.ASYNC)) {
+      const next = this.tokens[this.current + 1];
+      if (next && next.type !== TokenType.LPAREN && !next.wasNewlineBefore) {
+        this.advance();
+        isAsync = true;
+      }
+    }
+
     // constructor / method / getter / setter
     let kind = 'method';
     if (this.checkLexeme('get') && this.tokens[this.current + 1]?.type !== TokenType.LPAREN) {
@@ -405,7 +420,7 @@ class Parser {
     if (!computed && key.type === 'Identifier' && key.name === 'constructor') kind = 'constructor';
 
     const { params, body } = this.parseFunctionParamsBody();
-    return { type: 'MethodDefinition', key, value: { type: 'FunctionExpression', params, body, generator: isStar, async: false, loc }, kind, static: isStatic, computed, loc };
+    return { type: 'MethodDefinition', key, value: { type: 'FunctionExpression', params, body, generator: isStar, async: isAsync, loc }, kind, static: isStatic, computed, loc };
   }
 
   // ─── パターン（分割代入・パラメーター）──────────────────────────────────────
@@ -502,8 +517,9 @@ class Parser {
   }
 
   parseAssignment() {
-    // async アロー関数チェック
-    if (this.check(TokenType.ASYNC) && this.tokens[this.current + 1]?.type === TokenType.IDENTIFIER) {
+    // async アロー関数チェック（単一識別子: async x => ...）
+    if (this.check(TokenType.ASYNC) && this.tokens[this.current + 1]?.type === TokenType.IDENTIFIER &&
+        !this.tokens[this.current + 1]?.wasNewlineBefore) {
       const saved = this.current;
       this.advance(); // async
       const paramTok = this.advance(); // identifier
@@ -513,6 +529,23 @@ class Parser {
         const body = this.check(TokenType.LBRACE) ? this.parseBlock() : this.parseAssignment();
         return { type: 'ArrowFunctionExpression', params: [param], body, expression: body.type !== 'BlockStatement', async: true, loc: this.loc(this.tokens[saved]) };
       }
+      this.current = saved;
+    }
+
+    // async アロー関数チェック（括弧あり: async () => ... または async (params) => ...）
+    if (this.check(TokenType.ASYNC) && this.tokens[this.current + 1]?.type === TokenType.LPAREN &&
+        !this.tokens[this.current + 1]?.wasNewlineBefore) {
+      const saved = this.current;
+      const asyncTok = this.advance(); // async
+      this.advance(); // (
+      try {
+        const params = this.tryParseArrowParams();
+        if (this.check(TokenType.ARROW)) {
+          this.advance(); // =>
+          const body = this.check(TokenType.LBRACE) ? this.parseBlock() : this.parseAssignment();
+          return { type: 'ArrowFunctionExpression', params, body, expression: body.type !== 'BlockStatement', async: true, loc: this.loc(asyncTok) };
+        }
+      } catch (_) {}
       this.current = saved;
     }
 
@@ -645,12 +678,18 @@ class Parser {
   parseUnary() {
     const tok = this.peek();
     const unaryOps = [TokenType.BANG, TokenType.MINUS, TokenType.PLUS, TokenType.TILDE];
-    const wordOps  = [TokenType.TYPEOF, TokenType.VOID, TokenType.DELETE, TokenType.AWAIT];
+    const wordOps  = [TokenType.TYPEOF, TokenType.VOID, TokenType.DELETE];
 
     if (this.match(...unaryOps, ...wordOps)) {
       const op = this.previous().lexeme;
       const arg = this.parseUnary();
       return { type: 'UnaryExpression', operator: op, prefix: true, argument: arg, loc: this.loc(tok) };
+    }
+
+    // await 式（AwaitExpression ノードとして生成）
+    if (this.match(TokenType.AWAIT)) {
+      const arg = this.parseUnary();
+      return { type: 'AwaitExpression', argument: arg, loc: this.loc(tok) };
     }
 
     // 前置 ++/--
@@ -769,6 +808,13 @@ class Parser {
     if (this.match(TokenType.THIS))  return { type: 'ThisExpression', loc };
     if (this.match(TokenType.SUPER)) return { type: 'Super', loc };
 
+    // async function 式
+    if (this.check(TokenType.ASYNC) && this.tokens[this.current + 1]?.type === TokenType.FUNCTION &&
+        !this.tokens[this.current + 1]?.wasNewlineBefore) {
+      const asyncTok = this.advance(); // async
+      this.advance(); // function
+      return this.parseFunctionExpression(asyncTok, true);
+    }
     if (this.match(TokenType.FUNCTION)) {
       return this.parseFunctionExpression(this.previous());
     }
@@ -825,13 +871,13 @@ class Parser {
     return { type: 'TemplateLiteral', quasis, expressions, loc };
   }
 
-  parseFunctionExpression(funcToken) {
+  parseFunctionExpression(funcToken, isAsync = false) {
     const loc = this.loc(funcToken);
     const isStar = this.match(TokenType.STAR);
     let id = null;
     if (this.checkIdentifierName()) id = this.parseIdentifierNode();
     const { params, body } = this.parseFunctionParamsBody();
-    return { type: 'FunctionExpression', id, params, body, generator: isStar, async: false, loc };
+    return { type: 'FunctionExpression', id, params, body, generator: isStar, async: isAsync, loc };
   }
 
   parseClassExpression(classToken) {
@@ -993,7 +1039,11 @@ class Parser {
   }
 
   parseIdentifierNode() {
-    const tok = this.consume(TokenType.IDENTIFIER, '識別子を期待');
+    if (!this.checkIdentifierName()) {
+      const tok = this.peek();
+      throw new ParseError('識別子を期待', tok.line, tok.column);
+    }
+    const tok = this.advance();
     return { type: 'Identifier', name: tok.lexeme, loc: this.loc(tok) };
   }
 

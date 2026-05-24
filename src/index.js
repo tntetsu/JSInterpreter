@@ -219,6 +219,11 @@ async function runREPL() {
 
 function formatValue(val) {
   if (typeof val === 'string') return JSON.stringify(val);
+  if (val && val.__type__ === 'JSPromise') {
+    if (val.status === 'fulfilled') return `Promise { ${formatValue(val.value)} }`;
+    if (val.status === 'rejected')  return `Promise { <rejected> ${val.reason} }`;
+    return 'Promise { <pending> }';
+  }
   if (val && val.__type__ === 'JSFunction') return `[Function: ${val.name}]`;
   if (val && val.__type__ === 'JSClass')   return `[class ${val.name}]`;
   if (val && val.__type__ === '__instance__') return `[instance of ${val.__class__?.name}]`;

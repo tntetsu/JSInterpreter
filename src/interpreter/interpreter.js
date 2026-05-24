@@ -69,6 +69,68 @@ class Recorder {
   }
 }
 
+// ─── JSPromise（async/await の同期シミュレーション）────────────────────────────
+
+function makeFulfilledPromise(value) {
+  return { __type__: 'JSPromise', status: 'fulfilled', value };
+}
+
+function makeRejectedPromise(reason) {
+  return { __type__: 'JSPromise', status: 'rejected', reason };
+}
+
+/**
+ * JSPromise または平値を同期的に解決する。
+ * @returns {{ ok: boolean, value?: any, reason?: any }}
+ */
+function resolveJSPromise(val) {
+  if (val && val.__type__ === 'JSPromise') {
+    if (val.status === 'fulfilled') return { ok: true, value: val.value };
+    if (val.status === 'rejected')  return { ok: false, reason: val.reason };
+    return { ok: false, reason: new Error('Promise は保留中です（非同期 I/O は未対応）') };
+  }
+  // 非 Promise 値は解決済みとして扱う（await 42 → 42）
+  return { ok: true, value: val };
+}
+
+/**
+ * executor（JSFunction または native function）を同期的に呼び出して JSPromise を作る。
+ */
+function createJSPromiseFromExecutor(executor, recorder, depth, callDepth, loc) {
+  if (!executor) return makeFulfilledPromise(undefined);
+
+  let status = 'pending';
+  let resolvedValue;
+  let rejectedReason;
+
+  const resolve = (val) => {
+    if (status !== 'pending') return;
+    if (val && val.__type__ === 'JSPromise') {
+      status    = val.status;
+      resolvedValue  = val.value;
+      rejectedReason = val.reason;
+    } else {
+      status = 'fulfilled';
+      resolvedValue = val;
+    }
+  };
+
+  const reject = (r) => {
+    if (status !== 'pending') return;
+    status = 'rejected';
+    rejectedReason = r;
+  };
+
+  const result = callFunction(executor, [resolve, reject], undefined, recorder, depth, callDepth, loc);
+
+  // executor が例外を投げた場合（ThrowSignal）
+  if (result instanceof ThrowSignal && status === 'pending') {
+    return makeRejectedPromise(result.value);
+  }
+
+  return { __type__: 'JSPromise', status, value: resolvedValue, reason: rejectedReason };
+}
+
 // ─── 組み込みグローバル ────────────────────────────────────────────────────────
 
 function createGlobalEnv() {
@@ -90,7 +152,50 @@ function createGlobalEnv() {
   env.define('Array', Array);
   env.define('Object', Object);
   env.define('Symbol', Symbol);
-  env.define('Promise', Promise);
+  // カスタム Promise（同期的 JSPromise を返す）
+  const JSPromiseConstructor = function __JSPromiseConstructor__() {};
+  JSPromiseConstructor.__isJSPromiseConstructor = true;
+  JSPromiseConstructor.resolve = (val) => {
+    if (val && val.__type__ === 'JSPromise') return val;
+    return makeFulfilledPromise(val);
+  };
+  JSPromiseConstructor.reject = (reason) => makeRejectedPromise(reason);
+  JSPromiseConstructor.all = (promises) => {
+    const arr = Array.isArray(promises) ? promises : [...(promises || [])];
+    const values = [];
+    for (const p of arr) {
+      const r = resolveJSPromise(p);
+      if (!r.ok) return makeRejectedPromise(r.reason);
+      values.push(r.value);
+    }
+    return makeFulfilledPromise(values);
+  };
+  JSPromiseConstructor.allSettled = (promises) => {
+    const arr = Array.isArray(promises) ? promises : [...(promises || [])];
+    return makeFulfilledPromise(arr.map(p => {
+      const r = resolveJSPromise(p);
+      return r.ok ? { status: 'fulfilled', value: r.value } : { status: 'rejected', reason: r.reason };
+    }));
+  };
+  JSPromiseConstructor.race = (promises) => {
+    const arr = Array.isArray(promises) ? promises : [...(promises || [])];
+    for (const p of arr) {
+      const r = resolveJSPromise(p);
+      return r.ok ? makeFulfilledPromise(r.value) : makeRejectedPromise(r.reason);
+    }
+    return { __type__: 'JSPromise', status: 'pending' };
+  };
+  JSPromiseConstructor.any = (promises) => {
+    const arr = Array.isArray(promises) ? promises : [...(promises || [])];
+    const reasons = [];
+    for (const p of arr) {
+      const r = resolveJSPromise(p);
+      if (r.ok) return makeFulfilledPromise(r.value);
+      reasons.push(r.reason);
+    }
+    return makeRejectedPromise(new AggregateError(reasons, 'All promises were rejected'));
+  };
+  env.define('Promise', JSPromiseConstructor);
   env.define('Map', Map);
   env.define('Set', Set);
   env.define('WeakMap', WeakMap);
@@ -161,6 +266,7 @@ function _eval(node, env, recorder, depth, callDepth) {
     case 'VariableDeclaration': {
       for (const decl of node.declarations) {
         const val = decl.init ? evaluate(decl.init, env, recorder, d, callDepth) : undefined;
+        if (val instanceof ThrowSignal) return val;
         bindPattern(decl.id, val, env, recorder, d, callDepth);
       }
       return undefined;
@@ -183,6 +289,7 @@ function _eval(node, env, recorder, depth, callDepth) {
     // ── return ────────────────────────────────────────────────────────────────
     case 'ReturnStatement': {
       const val = node.argument ? evaluate(node.argument, env, recorder, d, callDepth) : undefined;
+      if (val instanceof ThrowSignal) return val; // throw を ReturnSignal で包まない
       return new ReturnSignal(val);
     }
 
@@ -510,6 +617,19 @@ function _eval(node, env, recorder, depth, callDepth) {
       return arr;
     }
 
+    // ── await 式 ──────────────────────────────────────────────────────────────
+    case 'AwaitExpression': {
+      const val = evaluate(node.argument, env, recorder, d, callDepth);
+      if (val instanceof ThrowSignal) return val;
+      // ネイティブ Promise は同期解決不可
+      if (val && typeof val === 'object' && typeof val.then === 'function' && val.__type__ !== 'JSPromise') {
+        return new ThrowSignal(new RuntimeError('ネイティブ Promise の await は未対応（同期実行のみサポート）', node.loc));
+      }
+      const resolved = resolveJSPromise(val);
+      if (resolved.ok) return resolved.value;
+      return new ThrowSignal(resolved.reason);
+    }
+
     default:
       throw new RuntimeError(`未対応のノード型: ${node.type}`, node.loc);
   }
@@ -660,6 +780,7 @@ function makeFunction(node, closureEnv, name) {
     params: node.params,
     body: node.body,
     expression: node.expression || false,
+    async: node.async || false,
     closure: closureEnv,
   };
 }
@@ -697,12 +818,19 @@ function callFunction(callee, args, thisValue, recorder, depth, callDepth, loc) 
 
     // 式本体のアロー関数（expression: true）は評価値を直接返す
     if (callee.expression) {
-      if (result instanceof ThrowSignal) return result;
-      return result;
+      if (result instanceof ThrowSignal) {
+        return callee.async ? makeRejectedPromise(result.value) : result;
+      }
+      const retVal = result instanceof ReturnSignal ? result.value : result;
+      return callee.async ? makeFulfilledPromise(retVal) : retVal;
     }
-    if (result instanceof ReturnSignal) return result.value;
-    if (result instanceof ThrowSignal)  return result; // 呼び出し元に伝播
-    return undefined;
+    if (result instanceof ReturnSignal) {
+      return callee.async ? makeFulfilledPromise(result.value) : result.value;
+    }
+    if (result instanceof ThrowSignal) {
+      return callee.async ? makeRejectedPromise(result.value) : result;
+    }
+    return callee.async ? makeFulfilledPromise(undefined) : undefined;
   }
   if (callee && callee.__type__ === 'JSClass') {
     throw new RuntimeError('クラスは new で呼び出してください', loc);
@@ -714,6 +842,10 @@ function callFunction(callee, args, thisValue, recorder, depth, callDepth, loc) 
  * new 呼び出し。
  */
 function callNew(ctor, args, recorder, depth, callDepth, loc) {
+  // JSPromise コンストラクタの特別処理
+  if (ctor && ctor.__isJSPromiseConstructor) {
+    return createJSPromiseFromExecutor(args[0], recorder, depth, callDepth, loc);
+  }
   if (typeof ctor === 'function') {
     try {
       const instance = new ctor(...args);
