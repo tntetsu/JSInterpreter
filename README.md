@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/tntetsu/JSInterpreter/actions/workflows/ci.yml/badge.svg)](https://github.com/tntetsu/JSInterpreter/actions/workflows/ci.yml)
 
-> 🌐 [日本語版](README.ja.md)
+> 🌐 [日本語版](README.ja.md) | 🚀 [Live Demo](https://tntetsu.github.io/JSInterpreter/)
 
 A JavaScript interpreter written in JavaScript. Supports ES6+ syntax including async/await and provides an **expression-level step execution API** — step-in, step-over, step-out, and step-back.
 

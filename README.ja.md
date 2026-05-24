@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/tntetsu/JSInterpreter/actions/workflows/ci.yml/badge.svg)](https://github.com/tntetsu/JSInterpreter/actions/workflows/ci.yml)
 
-> 🌐 [English version (main)](README.md)
+> 🌐 [English version (main)](README.md) | 🚀 [ライブデモ](https://tntetsu.github.io/JSInterpreter/)
 
 JavaScript で書かれた JavaScript インタープリターです。ES6+ 構文をサポートし、**式単位のステップ実行 API**（ステップイン・ステップオーバー・ステップアウト・ステップバック）を提供します。
 
