@@ -109,11 +109,12 @@ Web UI は2カラムレイアウトです：
 
 | パネル | 内容 |
 |-------|------|
-| **Source**（左） | 編集モード: コードエディター／デバッグモード: 現在行をハイライト表示 |
+| **Source**（左） | 編集モード: コードエディター／デバッグモード: 現在行をハイライト表示、評価中の部分式を黄色でハイライト |
 | **Controls**（右上） | Step In / Step Over / Step Out / Step Back / Human Step / Human Back / Continue |
 | **Current Step**（右） | phase・nodeType・行:列・depth・callDepth・評価値 |
-| **Variables**（右） | ローカルスコープの変数（チェックで全スコープ表示） |
-| **Call Stack**（右） | 呼び出しフレームの一覧 |
+| **Variables**（右） | 全スコープをマージして表示（内側優先・組み込みグローバル除外）、「スコープ別」チェックでフレームごとの表示に切り替え |
+| **Call Stack**（右） | 呼び出しフレームの一覧（関数名・位置・引数の実際の値を表示、例: `fib(5)`） |
+| **Console**（右） | `console.log/warn/error` の出力（現在ステップまでの分のみ表示、ステップバック時に遡る） |
 
 キーボードショートカット（デバッグ中のみ有効、CLI デバッガーと共通）：
 
@@ -258,7 +259,7 @@ npx jest src/interpreter/debugger.test.js
 npm run test:watch
 ```
 
-テストは 4 ファイル・185 件です。
+テストは 4 ファイル・187 件です。
 
 ## 既知の制限・未実装機能
 

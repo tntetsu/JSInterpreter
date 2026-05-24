@@ -233,17 +233,19 @@ F-12 provides a **"meaningful change point"** granularity that matches how a hum
 
 ### 5a.2 Surfaced Events
 
-Only `exit`-phase events for the following node types are surfaced:
+The following events are surfaced (native calls that do not increase `callDepth` are skipped):
 
-| Label | Node type | Description |
-|-------|-----------|-------------|
-| 宣言 (Declare) | `VariableDeclaration` | `let`/`const`/`var` declaration completed |
-| 代入 (Assign) | `AssignmentExpression` | Assignment or compound-assignment completed |
-| 更新 (Update) | `UpdateExpression` | `i++`, `--j`, etc. |
-| return | `ReturnStatement` | `return` executed |
-| throw | `ThrowStatement` | `throw` executed |
-| 呼出 (Call) | `CallExpression` | **User-defined function** call completed (detected by `callDepth` increase) |
-| 条件 (Condition) | condition test expression | `true`/`false` decision point of `if`, `while`, `do...while`, `for`, `? :` |
+| Label | Phase | Node type | Description |
+|-------|-------|-----------|-------------|
+| 宣言 (Declare) | exit | `VariableDeclaration` | `let`/`const`/`var` declaration completed |
+| 代入 (Assign) | exit | `AssignmentExpression` | Assignment or compound-assignment completed |
+| 更新 (Update) | exit | `UpdateExpression` | `i++`, `--j`, etc. |
+| return | exit | `ReturnStatement` | `return` executed |
+| throw | exit | `ThrowStatement` | `throw` executed |
+| 呼出 (Call before) | enter | `CallExpression` | **User-defined function** call about to happen (callee highlighted) |
+| 呼出 (Call enter) | enter | first statement in body | Just entered the function body (first statement highlighted) |
+| 呼出 (Call after) | exit | `CallExpression` | **User-defined function** call completed (return value confirmed) |
+| 条件 (Condition) | exit | condition test expression | `true`/`false` decision point of `if`, `while`, `do...while`, `for`, `? :` |
 
 **Native function calls** (e.g. `Math.floor()`, `arr.push()`) do **not** increase `callDepth` and are therefore skipped.
 
@@ -353,8 +355,10 @@ A browser-based visual debugger. The interpreter core is bundled into `web/inter
 │  Edit mode: <textarea>   │  Current Step          │
 │  Debug mode: highlighted ├────────────────────────┤
 │  source lines            │  Variables             │
-│                          ├────────────────────────┤
+│  + expression highlight  ├────────────────────────┤
 │  [step N / total]        │  Call Stack            │
+│                          ├────────────────────────┤
+│                          │  Console               │
 └──────────────────────────┴────────────────────────┘
 ```
 
@@ -371,9 +375,15 @@ A browser-based visual debugger. The interpreter core is bundled into `web/inter
 | Continue | `c` | continue() |
 | Reset | `r` | Return to edit mode |
 
+**Source panel**: The active line is highlighted. When the current event is an expression node, the exact column range is further highlighted in yellow to show which sub-expression is being evaluated.
+
 **Current Step card** shows: phase (enter/exit), nodeType, line:col, depth, callDepth, and evaluated value (exit events only).
 
-**Variables card**: local scope by default; "全スコープ" checkbox expands to the full scope chain, filtered to exclude internal function/class objects.
+**Variables card**: Default view shows all user-defined variables across all scopes merged (inner scope wins), excluding built-in global names (`Math`, `console`, `Array`, etc.). The "スコープ別" checkbox switches to a frame-by-frame view of the full scope chain (including built-in globals).
+
+**Call Stack card**: Each frame shows the function name, call site, and **the actual argument values at call time** (e.g. `fib(5)`, `bubbleSort([3,1,2])`). Values are deep-cloned at call time and are unaffected by later mutations.
+
+**Console card**: Displays output from `console.log()` / `console.warn()` / `console.error()`. Only entries produced up to the current cursor position are shown, so stepping back also rolls back console output.
 
 **Example programs** (dropdown): fibonacci, factorial, bubble sort, closure, class.
 
@@ -427,11 +437,11 @@ All errors are printed as human-readable messages **without** a stack trace.
 
 All features are covered by unit tests. Test files are co-located with their source files. Explicit `expect(result).toBe(...)` assertions are used; snapshot tests are not.
 
-**Test breakdown (185 total):**
+**Test breakdown (187 total):**
 
 | File | Count |
 |------|-------|
 | `src/lexer/lexer.test.js` | 45 |
 | `src/parser/parser.test.js` | 42 |
-| `src/interpreter/interpreter.test.js` | 50 |
+| `src/interpreter/interpreter.test.js` | 52 |
 | `src/interpreter/debugger.test.js` | 48 |

@@ -109,11 +109,12 @@ The web UI is a two-panel layout:
 
 | Panel | Content |
 |-------|---------|
-| **Source** (left) | Code editor in edit mode; line-highlighted read-only view in debug mode |
+| **Source** (left) | Code editor in edit mode; line-highlighted view in debug mode; the active sub-expression is highlighted in yellow |
 | **Controls** (right, top) | Step In / Step Over / Step Out / Step Back / Human Step / Human Back / Continue |
 | **Current Step** (right) | phase, nodeType, line:col, depth, callDepth, evaluated value |
-| **Variables** (right) | Local scope; toggle to show full scope chain |
-| **Call Stack** (right) | Ordered list of call frames |
+| **Variables** (right) | All user-defined variables merged (inner scope wins, built-in globals excluded); toggle "スコープ別" for frame-by-frame view |
+| **Call Stack** (right) | Call frames with function name, call site, and argument values (e.g. `fib(5)`) |
+| **Console** (right) | `console.log/warn/error` output up to the current step (rolls back with step-back) |
 
 Keyboard shortcuts (same as CLI, active while in debug mode):
 
@@ -258,7 +259,7 @@ npx jest src/interpreter/debugger.test.js
 npm run test:watch
 ```
 
-185 tests across 4 files.
+187 tests across 4 files.
 
 ## Known Limitations
 

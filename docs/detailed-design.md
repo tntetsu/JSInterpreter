@@ -86,11 +86,16 @@ Token {
   line:             number        // Line number (1-based)
   column:           number        // Column number (1-based)
   wasNewlineBefore: boolean       // Whether a newline preceded this token (for ASI)
+  endColumn:        number        // Inclusive end column of token in source (1-based)
 }
 ```
 
 `lexeme` holds the processed value, not the raw source text.  
 Example: the STRING token for `"hello\nworld"` has `lexeme = "hello\nworld"` (actual newline character).
+
+`endColumn` marks the inclusive end position of the token in the source line (including closing quotes for string literals).  
+Formula: `column + (this.current - this.start) - 1` (uses source length, not `lexeme.length`).  
+Used by the parser's `endLoc()` method to populate the `end` field on AST expression nodes.
 
 #### `TokenType`
 
@@ -206,10 +211,15 @@ Every AST node has:
 ```js
 {
   type: string,          // Node type (e.g. 'BinaryExpression')
-  loc:  { line: number, column: number },  // Source position (1-based)
+  loc:  { line: number, column: number },  // Node start position (1-based)
+  end:  { line: number, column: number } | null,  // Node end position (expression nodes only)
   // + node-type-specific fields
 }
 ```
+
+`end` is populated for expression nodes; statement nodes have `end: null`.  
+The parser computes `end` via its `endLoc()` method, which reads the `endColumn` of the most recently consumed token.  
+`Recorder.record()` copies this into `TraceEvent.end`, which the Web UI uses for sub-expression column highlighting.
 
 ### 3.3 Key AST Node Types
 
@@ -614,7 +624,8 @@ console
 interface TraceEvent {
   phase:     'enter' | 'exit'
   nodeType:  string                    // AST node type
-  loc:       { line: number, column: number }
+  loc:       { line: number, column: number }   // Node start position
+  end:       { line: number, column: number } | null  // Node end position (expressions only)
   depth:     number                    // AST nesting depth (Program = 0)
   callDepth: number                    // Function call depth (0 = top level)
   callStack: Frame[]                   // Snapshot of the call stack
@@ -626,6 +637,7 @@ interface TraceEvent {
 interface Frame {
   name: string                         // Function name
   loc:  { line: number, column: number }
+  args: any[]                          // Argument values at call time (deep-cloned)
 }
 ```
 
@@ -783,12 +795,21 @@ For each event at index i:
       UpdateExpression, ReturnStatement, ThrowStatement):
        if phase === 'exit' → add i to set
 
-  ② CallExpression — user-defined functions only:
-       Maintain a stack of open CallExpression enters.
-       When callDepth of any event exceeds the CallExpression's entry callDepth,
-       mark hasDeeper = true.
-       On exit: if hasDeeper → add i to set.
-       (Native calls such as Math.floor never increase callDepth → skipped.)
+  ② CallExpression — user-defined functions only (3 stops):
+       Stack entry: { baseCallDepth, enterIdx, state, innerDepth }
+         state 0: waiting for callDepth to increase
+         state 1: callDepth increase detected; searching for first statement in body
+         state 2: first statement enter already added
+
+       (A) On enter CallExpression: push entry (state=0)
+       When ev.callDepth > baseCallDepth:
+         state 0 → 1: add enterIdx (enter CallExpression) to set
+         state 1 and phase=enter:
+           nodeType is BlockStatement → record innerDepth = ev.depth + 1
+           innerDepth not yet set (expression-body arrow) → add i, state 2
+           ev.depth === innerDepth → add i (first statement), state 2
+       (C) On exit CallExpression: if state > 0 → add i to set
+       (Native calls never increase callDepth → skipped.)
 
   ③ IfStatement / ConditionalExpression condition test (once):
        On enter: add trace[i+1].matchIdx to set
@@ -972,13 +993,33 @@ No Node.js shims are required: `createGlobalEnv()` registers only browser-compat
 
 | Panel | DOM element | Updated by |
 |-------|-------------|------------|
-| Source display | `#source-lines` | `renderSource(source, line)` |
+| Source display | `#source-lines` | `renderSource(source, line, event)` |
 | Current Step | `#current-event` | `renderCurrentEvent(event)` |
 | Variables | `#variables` | `renderVariables(event)` |
 | Call Stack | `#callstack` | `renderCallStack(event)` |
+| Console output | `#console-output` | `renderConsole(event)` |
 | Step counter | `#step-counter` | `updateUI()` |
 
-All four render functions are called together inside `updateUI()`, which is invoked after every step operation and after the scope-all checkbox changes.
+All five render functions are called together inside `updateUI()`, which is invoked after every step operation and after the "スコープ別" checkbox changes.
+
+#### renderSource — Sub-expression Highlight
+
+When the current event is an expression node with `event.end` set on the same line:
+
+```js
+const s = event.loc.column - 1;    // 0-based start
+const e = event.end.column;        // 0-based exclusive end
+// Split source line into 3 parts; wrap middle in <span class="src-expr">
+```
+
+#### renderVariables — Display Modes
+
+- **Default (scope-all unchecked)**: Traverse the scope chain from innermost outward, merging all variables into one Map (inner wins). Filter out `BUILTIN_NAMES` (23 built-in global names registered by `createGlobalEnv()`) and internal markers (`__type__`, etc.). Displays only user-defined variables.
+- **Scope-by-scope (scope-all checked)**: Render each scope frame separately with a header label, including built-in globals.
+
+#### renderCallStack — Argument Values
+
+For each frame, up to 3 arguments are formatted via `formatValue()` and appended as `(arg1, arg2, …)` after the function name. A `…` suffix is shown when there are more than 3 arguments.
 
 ### 9.4 formatValue
 
@@ -1021,10 +1062,10 @@ Active when `document.activeElement !== sourceEditor` and `dbg !== null`:
 |-----------|---------|-------|
 | `src/lexer/lexer.test.js` | Lexer | 45 |
 | `src/parser/parser.test.js` | Parser | 42 |
-| `src/interpreter/interpreter.test.js` | Interpreter / Recorder | 50 |
+| `src/interpreter/interpreter.test.js` | Interpreter / Recorder | 52 |
 | `src/interpreter/debugger.test.js` | JSDebugger | 48 |
 
-**Total: 185 tests**
+**Total: 187 tests**
 
 ### 9.2 Debugger Test Policy
 
@@ -1042,7 +1083,7 @@ Active when `document.activeElement !== sourceEditor` and `dbg !== null`:
 | async/await | async functions return JSPromise, await resolves synchronously |
 | humanStep | VariableDeclaration/AssignmentExpression/UpdateExpression surfaced; Literal/Identifier/BinaryExpression skipped |
 | humanStep (conditions) | if/while/for condition exits captured with true/false values; all loop iterations captured |
-| humanStep (calls) | user-defined function CallExpression surfaced; native calls (Math.floor) skipped |
+| humanStep (calls) | 3 stops per user-defined call: enter CallExpression (before call), first statement enter (entering body), exit CallExpression (after return); native calls (Math.floor) skipped |
 | humanStepBack | retreats to previous human event; no-op at cursor=0 |
 | getSourceLine | returns trimmed source text for given line number |
 
