@@ -746,6 +746,35 @@ function assignTo(node, value, env, recorder, depth, callDepth) {
     obj[key] = value;
     return;
   }
+  // ── 配列分割代入: [a, b] = rhs  （パーサーは左辺を ArrayExpression で表現） ──
+  if (node.type === 'ArrayExpression') {
+    const arr = value ?? [];
+    for (let i = 0; i < node.elements.length; i++) {
+      const elem = node.elements[i];
+      if (!elem) continue;
+      if (elem.type === 'SpreadElement') {
+        assignTo(elem.argument, arr.slice(i), env, recorder, depth, callDepth);
+        break;
+      }
+      assignTo(elem, arr[i], env, recorder, depth, callDepth);
+    }
+    return;
+  }
+  // ── オブジェクト分割代入: ({x, y} = rhs) （左辺は ObjectExpression） ─────────
+  if (node.type === 'ObjectExpression') {
+    const obj = value ?? {};
+    for (const prop of node.properties) {
+      if (prop.type === 'SpreadElement') {
+        assignTo(prop.argument, { ...obj }, env, recorder, depth, callDepth);
+        continue;
+      }
+      const key = prop.computed
+        ? evaluate(prop.key, env, recorder, depth, callDepth)
+        : (prop.key.type === 'Literal' ? prop.key.value : prop.key.name);
+      assignTo(prop.value, obj[key], env, recorder, depth, callDepth);
+    }
+    return;
+  }
   throw new RuntimeError('代入先が不正です', node.loc);
 }
 

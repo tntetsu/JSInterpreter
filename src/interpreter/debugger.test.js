@@ -610,4 +610,41 @@ describe('JSDebugger', () => {
       expect(dbg.getSourceLine(2)).toBe('let y = 2;');
     });
   });
+
+  // ── 分割代入 ────────────────────────────────────────────────────────────────
+  describe('分割代入', () => {
+    /** 最終 trace イベントの env（グローバルスコープ）を返す */
+    function finalEnv(source) {
+      const dbg = new JSDebugger(source);
+      const last = dbg.trace[dbg.trace.length - 1];
+      return last?.env?.[last.env.length - 1] ?? {};
+    }
+
+    test('配列スワップ [a, b] = [b, a]', () => {
+      const env = finalEnv('let a = 1, b = 2; [a, b] = [b, a];');
+      expect(env.a).toBe(2);
+      expect(env.b).toBe(1);
+    });
+
+    test('配列要素スワップ [arr[i], arr[j]] = [arr[j], arr[i]]', () => {
+      const env = finalEnv('const arr = [10, 20, 30]; [arr[0], arr[2]] = [arr[2], arr[0]];');
+      expect(env.arr[0]).toBe(30);
+      expect(env.arr[2]).toBe(10);
+    });
+
+    test('オブジェクト分割代入 ({x, y} = obj)', () => {
+      const env = finalEnv('let x, y; ({ x, y } = { x: 7, y: 8 });');
+      expect(env.x).toBe(7);
+      expect(env.y).toBe(8);
+    });
+
+    test('ユークリッド互除法（ループ）で分割代入スワップ', () => {
+      const env = finalEnv(`
+        let x = 851, y = 629;
+        while (y > 0) { [x, y] = [y, x % y]; }
+        let gcd = x;
+      `);
+      expect(env.gcd).toBe(37);
+    });
+  });
 });
