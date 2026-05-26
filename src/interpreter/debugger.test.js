@@ -575,8 +575,8 @@ describe('JSDebugger', () => {
       }
       expect(found).not.toBeNull();
       expect(found.phase).toBe('exit');
-      // ReturnStatement の value は ReturnSignal { value: 42 }
-      expect(found.value?.value).toBe(42);
+      // ReturnStatement の value は unwrapped（ReturnSignal を解除した実際の値）
+      expect(found.value).toBe(42);
     });
 
     test('humanStepBack で直前の human イベントに戻る', () => {

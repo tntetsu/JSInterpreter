@@ -80,7 +80,14 @@ class Recorder {
       matchIdx: -1,
     });
 
-    const value = fn();
+    const rawValue = fn();
+
+    // ReturnSignal / ThrowSignal を unwrap: trace には実際の値を記録し、
+    // シグナル本体はそのまま return して制御フロー伝播に使う
+    let traceValue = rawValue;
+    if (rawValue instanceof ReturnSignal || rawValue instanceof ThrowSignal) {
+      traceValue = rawValue.value;
+    }
 
     const exitIdx = this.trace.length;
     this.trace.push({
@@ -92,12 +99,12 @@ class Recorder {
       callDepth,
       callStack: this.callStack.map(f => ({ ...f })),
       env: env.snapshot(),
-      value,
+      value: traceValue,
       matchIdx: enterIdx,
     });
     this.trace[enterIdx].matchIdx = exitIdx;
 
-    return value;
+    return rawValue;
   }
 }
 
