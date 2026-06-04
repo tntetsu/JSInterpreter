@@ -108,6 +108,19 @@ class Environment {
   }
 
   /**
+   * このスコープ自身のバインディングだけをディープクローンして返す（親チェーンをたどらない）。
+   * callFunction の frameEnvStack 用途に使用する。
+   * @returns {Object} { name: value } のプレーンオブジェクト
+   */
+  snapshotOwn() {
+    const frame = {};
+    for (const [k, v] of this.bindings) {
+      frame[k] = deepClone(v);
+    }
+    return frame;
+  }
+
+  /**
    * スコープチェーン全体のディープクローンを返す。
    * デバッグ用のスナップショットとして使用する。
    *

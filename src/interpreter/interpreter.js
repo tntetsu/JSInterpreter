@@ -38,9 +38,10 @@ function formatLogArg(v) {
 
 class Recorder {
   constructor() {
-    this.trace = [];        // TraceEvent[]
-    this.callStack = [];    // Frame[]  { name, loc }
-    this.consoleLogs = [];  // { atIndex: number, level: string, text: string }
+    this.trace = [];          // TraceEvent[]
+    this.callStack = [];      // Frame[]  { name, loc, args }
+    this.consoleLogs = [];    // { atIndex: number, level: string, text: string }
+    this.frameEnvStack = [];  // Environment[]  各アクティブフレームの callEnv（push 順 = 外→内）
   }
 
   /**
@@ -66,6 +67,9 @@ class Recorder {
    * fn() の戻り値を返す。
    */
   record(node, env, depth, callDepth, fn) {
+    // 各アクティブフレームの callEnv を現時点でスナップショット（外→内の順）
+    const frameEnvs = this.frameEnvStack.map(e => e.snapshotOwn());
+
     const enterIdx = this.trace.length;
     this.trace.push({
       phase: 'enter',
@@ -76,6 +80,7 @@ class Recorder {
       callDepth,
       callStack: this.callStack.map(f => ({ ...f })),
       env: env.snapshot(),
+      frameEnvs,
       value: undefined,
       matchIdx: -1,
     });
@@ -89,6 +94,9 @@ class Recorder {
       traceValue = rawValue.value;
     }
 
+    // exit 時点で再スナップショット（ローカル変数が更新されている可能性があるため）
+    const exitFrameEnvs = this.frameEnvStack.map(e => e.snapshotOwn());
+
     const exitIdx = this.trace.length;
     this.trace.push({
       phase: 'exit',
@@ -99,6 +107,7 @@ class Recorder {
       callDepth,
       callStack: this.callStack.map(f => ({ ...f })),
       env: env.snapshot(),
+      frameEnvs: exitFrameEnvs,
       value: traceValue,
       matchIdx: enterIdx,
     });
@@ -886,6 +895,8 @@ function callFunction(callee, args, thisValue, recorder, depth, callDepth, loc) 
         loc:  loc || { line: 0, column: 0 },
         args: args.map(a => deepClone(a)),
       });
+      // このフレームの callEnv を frameEnvStack に登録（スコープ表示用）
+      recorder.frameEnvStack.push(callEnv);
     }
 
     // 関数ボディは呼び出し深さを +1 して評価する
@@ -898,7 +909,10 @@ function callFunction(callee, args, thisValue, recorder, depth, callDepth, loc) 
       result = evaluate(callee.body, callEnv, recorder, depth, bodyCallDepth);
     }
 
-    if (recorder) recorder.callStack.pop();
+    if (recorder) {
+      recorder.callStack.pop();
+      recorder.frameEnvStack.pop();
+    }
 
     // 式本体のアロー関数（expression: true）は評価値を直接返す
     if (callee.expression) {
@@ -1022,9 +1036,15 @@ function newInstance(cls, args, recorder, depth, callDepth, loc) {
     }
 
     bindParams(cls.constructor.params, args, ctorEnv, recorder, depth, callDepth);
-    if (recorder) recorder.callStack.push({ name: cls.name, loc: loc || { line: 0, column: 0 }, args: args.map(a => deepClone(a)) });
+    if (recorder) {
+      recorder.callStack.push({ name: cls.name, loc: loc || { line: 0, column: 0 }, args: args.map(a => deepClone(a)) });
+      recorder.frameEnvStack.push(ctorEnv);
+    }
     const result = evaluate(cls.constructor.body, ctorEnv, recorder, depth, callDepth);
-    if (recorder) recorder.callStack.pop();
+    if (recorder) {
+      recorder.callStack.pop();
+      recorder.frameEnvStack.pop();
+    }
     if (result instanceof ThrowSignal) return result;
   } else if (cls.superClass && cls.superClass.__type__ === 'JSClass') {
     // 暗黙のコンストラクターで super を呼ぶ
