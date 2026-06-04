@@ -587,6 +587,32 @@ function _eval(node, env, recorder, depth, callDepth) {
     // ── 関数呼び出し ──────────────────────────────────────────────────────────
     case 'CallExpression':
     case 'OptionalCallExpression': {
+      // super() を new 呼び出しとして処理（継承コンストラクター呼び出し）
+      if (node.callee.type === 'Super') {
+        const superClass = env.get('__super__', node.loc);
+        const args = [];
+        for (const arg of node.arguments) {
+          if (arg.type === 'SpreadElement') {
+            args.push(...toArray(evaluate(arg.argument, env, recorder, d, callDepth)));
+          } else {
+            args.push(evaluate(arg, env, recorder, d, callDepth));
+          }
+        }
+        const thisObj = env.get('this', node.loc);
+        // 親クラスのコンストラクターを this に対して実行する
+        if (superClass && superClass.__type__ === 'JSClass' && superClass.constructor) {
+          const ctorEnv = new Environment(superClass.env);
+          ctorEnv.define('this', thisObj);
+          if (superClass.superClass && superClass.superClass.__type__ === 'JSClass') {
+            ctorEnv.define('__super__', superClass.superClass);
+          }
+          bindParams(superClass.constructor.params, args, ctorEnv, recorder, d, callDepth);
+          const result = evaluate(superClass.constructor.body, ctorEnv, recorder, d, callDepth);
+          if (result instanceof ThrowSignal) return result;
+        }
+        return thisObj;
+      }
+
       const callee = evaluate(node.callee, env, recorder, d, callDepth);
       if (callee === undefined || callee === null) {
         if (node.type === 'OptionalCallExpression') return undefined;
