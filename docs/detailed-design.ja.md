@@ -3,7 +3,7 @@
 **プロジェクト名**: JSInterpreter  
 **バージョン**: 1.1.0  
 **作成日**: 2026-05-24  
-**最終更新**: 2026-05-24  
+**最終更新**: 2026-06-04  
 **対象読者**: 実装者・コードレビュアー
 
 > 🌐 [English version](detailed-design.md)
@@ -611,6 +611,33 @@ console
 ```
 
 **注意**: ネイティブの `Promise` は `JSPromiseConstructor` に置き換えられる。`JSPromiseConstructor` は `Promise.resolve`, `Promise.reject`, `Promise.all`, `Promise.allSettled`, `Promise.race`, `Promise.any` の各静的メソッドを実装し、`new Promise(executor)` も同期的に処理する。
+
+### 5.9 console.log の引数フォーマット
+
+`formatLogArg(v, depth = 0)` は `console.log` / `console.warn` / `console.error` の引数をランタイム値から文字列に変換する関数。  
+CLI のターミナル出力と、`Recorder.consoleLogs`（CodeTrace / JSVisualizer の Console パネル用）の両方で使用する。
+
+Node.js 互換のフォーマットルール:
+
+| 値の種別 | `depth === 0`（最上位の引数） | `depth > 0`（配列/オブジェクト内にネスト） |
+|---------|-----------------------------|-----------------------------------------|
+| `string` | クォートなし: `hello` | シングルクォート: `'hello'` |
+| `number` / `boolean` / `null` | `String(v)` | `String(v)` |
+| 配列 | `[ e1, e2, ... ]` | `[ e1, e2, ... ]` |
+| プレーンオブジェクト | `{ k: v, ... }` | `{ k: v, ... }` |
+| `JSPromise`（fulfilled） | `Promise { value }` | `Promise { value }` |
+| `JSPromise`（rejected） | `Promise { <rejected> reason }` | `Promise { <rejected> reason }` |
+
+`__` で始まるキーはオブジェクト表示から除外する（内部マーカー）。
+
+```js
+console.log('hello');           // → hello
+console.log(['aaa', 'bbb']);    // → [ 'aaa', 'bbb' ]
+console.log({ x: 'foo' });     // → { x: 'foo' }
+console.log(Promise.resolve(42)); // → Promise { 42 }
+```
+
+`formatValue()`（§9.4）は CodeTrace Web UI の HTML 生成用であり、この関数とは別物。
 
 ---
 

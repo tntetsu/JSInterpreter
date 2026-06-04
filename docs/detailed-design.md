@@ -3,7 +3,7 @@
 **Project**: JSInterpreter  
 **Version**: 1.1.0  
 **Created**: 2026-05-24  
-**Updated**: 2026-05-24  
+**Updated**: 2026-06-04  
 **Audience**: Implementers, code reviewers
 
 > 🌐 [日本語版](detailed-design.ja.md)
@@ -611,6 +611,33 @@ console
 ```
 
 **Note**: The native `Promise` is replaced by `JSPromiseConstructor`, which implements `Promise.resolve`, `Promise.reject`, `Promise.all`, `Promise.allSettled`, `Promise.race`, `Promise.any`, and `new Promise(executor)` — all synchronously.
+
+### 5.9 console.log Argument Formatting
+
+`formatLogArg(v, depth = 0)` converts runtime values to strings for `console.log` / `console.warn` / `console.error` output.  
+This function is used both for direct terminal output (CLI mode) and for populating `Recorder.consoleLogs` (CodeTrace / JSVisualizer).
+
+The format follows Node.js conventions:
+
+| Value type | `depth === 0` (top-level arg) | `depth > 0` (nested in array/object) |
+|------------|-------------------------------|--------------------------------------|
+| `string` | No quotes: `hello` | Single quotes: `'hello'` |
+| `number` / `boolean` / `null` | `String(v)` | `String(v)` |
+| Array | `[ e1, e2, ... ]` | `[ e1, e2, ... ]` |
+| Plain object | `{ k: v, ... }` | `{ k: v, ... }` |
+| `JSPromise` (fulfilled) | `Promise { value }` | `Promise { value }` |
+| `JSPromise` (rejected) | `Promise { <rejected> reason }` | `Promise { <rejected> reason }` |
+
+Keys starting with `__` are excluded from object output (internal markers).
+
+```js
+console.log('hello');           // → hello
+console.log(['aaa', 'bbb']);    // → [ 'aaa', 'bbb' ]
+console.log({ x: 'foo' });     // → { x: 'foo' }
+console.log(Promise.resolve(42)); // → Promise { 42 }
+```
+
+This function is distinct from `formatValue()` (§9.4), which generates CSS-annotated HTML for the CodeTrace web UI.
 
 ---
 

@@ -3,7 +3,7 @@
 **Project**: JSInterpreter  
 **Version**: 1.1.0  
 **Created**: 2026-05-24  
-**Updated**: 2026-05-24  
+**Updated**: 2026-06-04  
 **Audience**: Product owners, developers, testers
 
 > 🌐 [日本語版](functional-specification.ja.md)
@@ -384,7 +384,7 @@ A browser-based execution visualizer aimed at learners. The interpreter core is 
 
 **Call Stack card**: Each frame shows the function name, call site, and **the actual argument values at call time** (e.g. `fib(5)`, `bubbleSort([3,1,2])`). Values are deep-cloned at call time and are unaffected by later mutations.
 
-**Console card**: Displays output from `console.log()` / `console.warn()` / `console.error()`. Only entries produced up to the current cursor position are shown, so stepping back also rolls back console output.
+**Console card**: Displays output from `console.log()` / `console.warn()` / `console.error()`. Only entries produced up to the current cursor position are shown, so stepping back also rolls back console output. Output uses a Node.js-compatible format: top-level string arguments are printed without quotes; strings nested inside arrays or objects are displayed with single quotes (e.g. `console.log(['aaa'])` → `[ 'aaa' ]`). `JSPromise` values are displayed as `Promise { value }` or `Promise { <rejected> reason }`.
 
 **Inline trace table**: Toggled by the `📊 Trace` button (or key `t`). When ON, the Source panel switches to a table layout in which each source line grows extra columns to its right.
 
