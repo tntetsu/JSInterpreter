@@ -46,6 +46,7 @@ class JSDebugger {
 
     evaluate(ast, env, recorder, 0, 0);
 
+    this.ast         = ast;                   // 解析済み AST（制御フロービュー用）
     this.trace       = recorder.trace;        // TraceEvent[]
     this.consoleLogs = recorder.consoleLogs;  // ConsoleLog[]
     this.cursor = 0;                          // 現在位置（0 始まり）
