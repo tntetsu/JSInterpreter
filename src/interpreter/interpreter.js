@@ -17,23 +17,24 @@ class ThrowSignal   { constructor(v) { this.value = v; } }
  */
 /**
  * console.log 等の引数をプレーンな文字列に変換する。
- * ネイティブの console と同様、文字列はクォートなしで表示する。
+ * depth=0 の文字列はクォートなし（console.log の標準動作）。
+ * 配列・オブジェクト内の文字列はシングルクォート付き（Node.js と同様）。
  */
-function formatLogArg(v) {
+function formatLogArg(v, depth = 0) {
   if (v === null)      return 'null';
   if (v === undefined) return 'undefined';
-  if (typeof v === 'string') return v;           // クォートなし（console.log の標準動作）
+  if (typeof v === 'string') return depth === 0 ? v : `'${v}'`;
   if (typeof v !== 'object') return String(v);
   if (v.__type__ === 'JSFunction') return '[Function (anonymous)]';
   if (v.__type__ === 'JSClass')    return '[class]';
   if (v.__type__ === 'JSPromise')  {
-    if (v.status === 'fulfilled') return `Promise { ${formatLogArg(v.value)} }`;
-    if (v.status === 'rejected')  return `Promise { <rejected> ${formatLogArg(v.reason)} }`;
+    if (v.status === 'fulfilled') return `Promise { ${formatLogArg(v.value, 1)} }`;
+    if (v.status === 'rejected')  return `Promise { <rejected> ${formatLogArg(v.reason, 1)} }`;
     return 'Promise { <pending> }';
   }
-  if (Array.isArray(v)) return '[ ' + v.map(formatLogArg).join(', ') + ' ]';
+  if (Array.isArray(v)) return '[ ' + v.map(x => formatLogArg(x, depth + 1)).join(', ') + ' ]';
   const keys = Object.keys(v).filter(k => !k.startsWith('__'));
-  return '{ ' + keys.map(k => `${k}: ${formatLogArg(v[k])}`).join(', ') + ' }';
+  return '{ ' + keys.map(k => `${k}: ${formatLogArg(v[k], depth + 1)}`).join(', ') + ' }';
 }
 
 class Recorder {
