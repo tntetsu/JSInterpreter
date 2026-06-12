@@ -1,5 +1,6 @@
 import { parse }       from '../parser/parser.js';
 import { evaluate, createGlobalEnv, Recorder } from './interpreter.js';
+import { createVirtualDocument } from './virtual-dom.js';
 
 /**
  * JSDebugger — ステップ実行 API
@@ -34,6 +35,7 @@ class JSDebugger {
    * @param {string} source  実行するソースコード
    * @param {Object} [options]
    * @param {number} [options.maxSteps=100_000]  最大ステップ数
+   * @param {boolean} [options.dom=false]        DOM モード（VirtualDOM を有効化）
    */
   constructor(source, options = {}) {
     this.source   = source;
@@ -43,6 +45,13 @@ class JSDebugger {
     const ast      = parse(source);
     const recorder = new Recorder();
     const env      = createGlobalEnv(recorder);   // console を横取り
+
+    if (options.dom) {
+      const vdom = createVirtualDocument();
+      recorder.vdom = vdom;
+      env.define('document', vdom);
+      env.define('window', { document: vdom, __type__: 'VWindow' });
+    }
 
     evaluate(ast, env, recorder, 0, 0);
 

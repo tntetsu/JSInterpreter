@@ -43,6 +43,7 @@ class Recorder {
     this.callStack = [];      // Frame[]  { name, loc, args }
     this.consoleLogs = [];    // { atIndex: number, level: string, text: string }
     this.frameEnvStack = [];  // Environment[]  各アクティブフレームの callEnv（push 順 = 外→内）
+    this.vdom = null;         // VirtualDocument | null（DOM モード時に JSDebugger がセット）
   }
 
   /**
@@ -82,6 +83,7 @@ class Recorder {
       callStack: this.callStack.map(f => ({ ...f })),
       env: env.snapshot(),
       frameEnvs,
+      domSnapshot: this.vdom ? this.vdom.snapshot() : null,
       value: undefined,
       matchIdx: -1,
     });
@@ -109,6 +111,7 @@ class Recorder {
       callStack: this.callStack.map(f => ({ ...f })),
       env: env.snapshot(),
       frameEnvs: exitFrameEnvs,
+      domSnapshot: this.vdom ? this.vdom.snapshot() : null,
       value: traceValue,
       matchIdx: enterIdx,
     });
