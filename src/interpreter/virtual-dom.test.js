@@ -558,3 +558,68 @@ test('T-53: querySelector で複合セレクタ（tag.class）が使える', () 
   expect(doc.querySelector('div.active')).toBe(div);
   expect(doc.querySelector('div.other')).toBeNull();
 });
+
+// ── generateEventSequenceSkeleton（T-54〜T-58）────────────────────────────────
+
+import { generateEventSequenceSkeleton } from './virtual-dom.js';
+
+test('T-54: addEventListener 登録済み要素からスケルトンが生成される', () => {
+  const dbg = new JSDebugger(`
+    document.getElementById('btn').addEventListener('click', function() {});
+  `, {
+    dom: true,
+    initialBodyHTML: '<button id="btn">OK</button>',
+  });
+  const sk = dbg.getEventSequenceSkeleton();
+  expect(sk.length).toBeGreaterThan(0);
+  expect(sk[0].type).toBe('click');
+  expect(sk[0].target).toBe('#btn');
+});
+
+test('T-55: スケルトンに description フィールドが含まれる', () => {
+  const dbg = new JSDebugger(`
+    document.getElementById('btn').addEventListener('click', function() {});
+  `, {
+    dom: true,
+    initialBodyHTML: '<button id="btn">送信</button>',
+  });
+  const sk = dbg.getEventSequenceSkeleton();
+  expect(typeof sk[0].description).toBe('string');
+  expect(sk[0].description.length).toBeGreaterThan(0);
+});
+
+test('T-56: BUTTON 要素の click スケルトンには「ボタンを左クリック」が含まれる', () => {
+  const dbg = new JSDebugger(`
+    document.getElementById('btn').addEventListener('click', function() {});
+  `, {
+    dom: true,
+    initialBodyHTML: '<button id="btn">追加</button>',
+  });
+  const sk = dbg.getEventSequenceSkeleton();
+  expect(sk[0].description).toContain('ボタンを左クリック');
+});
+
+test('T-57: input イベントのスケルトンには value フィールドが含まれる', () => {
+  const dbg = new JSDebugger(`
+    document.getElementById('inp').addEventListener('input', function() {});
+  `, {
+    dom: true,
+    initialBodyHTML: '<input id="inp">',
+  });
+  const sk = dbg.getEventSequenceSkeleton();
+  expect(sk[0].type).toBe('input');
+  expect(Object.prototype.hasOwnProperty.call(sk[0], 'value')).toBe(true);
+  expect(sk[0].value).toBe('');
+});
+
+test('T-58: keydown イベントのスケルトンには key フィールドが含まれる', () => {
+  const dbg = new JSDebugger(`
+    document.getElementById('inp').addEventListener('keydown', function() {});
+  `, {
+    dom: true,
+    initialBodyHTML: '<input id="inp">',
+  });
+  const sk = dbg.getEventSequenceSkeleton();
+  expect(sk[0].type).toBe('keydown');
+  expect(sk[0].key).toBe('Enter');
+});
