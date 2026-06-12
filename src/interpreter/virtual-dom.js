@@ -9,6 +9,7 @@
  *  - textContent / innerHTML は Object.defineProperty で getter/setter を実装
  *    → interpreter の assignTo が obj[key] = val を実行するため setter が呼ばれる
  *  - _parent / _doc は enumerable: false → deepClone に含まれず循環参照が起きない
+ *  - _listeners は enumerable: false → deepClone・serializeVNode に含まれない
  *  - __vnode_id__ は生成時に単調増加カウンタで付与（削除後も再利用しない）
  */
 
@@ -18,6 +19,40 @@ let _vnodeCounter = 0;
 
 /** テスト用にカウンタをリセットする（本番コードでは使わない） */
 export function _resetVnodeCounter() { _vnodeCounter = 0; }
+
+// ── イベントオブジェクト ───────────────────────────────────────────────────────
+
+/**
+ * VEvent を生成する。Event / MouseEvent 等コンストラクタの実体。
+ * @param {string} type
+ * @param {{ bubbles?: boolean, cancelable?: boolean }} [opts]
+ */
+export function makeVEvent(type, opts = {}) {
+  const bubbles    = opts.bubbles    !== false;
+  const cancelable = opts.cancelable !== false;
+  const ev = {
+    __type__:      'VEvent',
+    type:          String(type ?? ''),
+    bubbles,
+    cancelable,
+    target:        null,
+    currentTarget: null,
+    _defaultPrevented:  false,
+    _stopped:           false,
+    _stoppedImmediate:  false,
+  };
+  ev.preventDefault = function() {
+    if (ev.cancelable) ev._defaultPrevented = true;
+  };
+  ev.stopPropagation = function() {
+    ev._stopped = true;
+  };
+  ev.stopImmediatePropagation = function() {
+    ev._stopped = true;
+    ev._stoppedImmediate = true;
+  };
+  return ev;
+}
 
 // ── テキストノード ────────────────────────────────────────────────────────────
 
@@ -110,7 +145,21 @@ function makeVNode(tagName, doc) {
     enumerable: true, configurable: true,
   });
 
-  // ── メソッド ───────────────────────────────────────────────────────────────
+  // ── parentNode / parentElement ─────────────────────────────────────────────
+
+  Object.defineProperty(node, 'parentNode', {
+    get() { return node._parent; },
+    enumerable: true, configurable: true,
+  });
+
+  Object.defineProperty(node, 'parentElement', {
+    get() {
+      return (node._parent && node._parent.nodeType === 1) ? node._parent : null;
+    },
+    enumerable: true, configurable: true,
+  });
+
+  // ── DOM 操作メソッド ───────────────────────────────────────────────────────
 
   node.appendChild = function(child) {
     if (!child || typeof child !== 'object') return child;
@@ -182,6 +231,95 @@ function makeVNode(tagName, doc) {
 
   node.cloneNode = function(deep) {
     return cloneVNode(node, deep);
+  };
+
+  // ── classList ─────────────────────────────────────────────────────────────
+
+  Object.defineProperty(node, 'classList', {
+    get() {
+      const getClasses = () =>
+        node.className ? node.className.split(/\s+/).filter(Boolean) : [];
+      return {
+        __type__: 'DOMTokenList',
+        add(...names) {
+          const cls = getClasses();
+          for (const n of names) if (!cls.includes(n)) cls.push(n);
+          node.className = cls.join(' ');
+        },
+        remove(...names) {
+          let cls = getClasses();
+          for (const n of names) cls = cls.filter(c => c !== n);
+          node.className = cls.join(' ');
+        },
+        toggle(name, force) {
+          const cls = getClasses();
+          const has = cls.includes(name);
+          if (force === true || (force === undefined && !has)) {
+            if (!has) cls.push(name);
+            node.className = cls.join(' ');
+            return true;
+          }
+          node.className = cls.filter(c => c !== name).join(' ');
+          return false;
+        },
+        contains(name) { return getClasses().includes(name); },
+        replace(oldName, newName) {
+          const cls = getClasses();
+          const i = cls.indexOf(oldName);
+          if (i !== -1) { cls[i] = newName; node.className = cls.join(' '); return true; }
+          return false;
+        },
+        get length() { return getClasses().length; },
+        item(i) { return getClasses()[i] ?? null; },
+        toString() { return node.className; },
+      };
+    },
+    enumerable: false,
+    configurable: true,
+  });
+
+  // ── closest / matches ──────────────────────────────────────────────────────
+
+  node.closest = function(selector) {
+    let n = node;
+    while (n && n.nodeType === 1) {
+      if (matchesSelector(n, selector)) return n;
+      n = n._parent ?? null;
+    }
+    return null;
+  };
+
+  node.matches = function(selector) {
+    return matchesSelector(node, selector);
+  };
+
+  // ── イベントリスナー ───────────────────────────────────────────────────────
+
+  Object.defineProperty(node, '_listeners', {
+    value: Object.create(null),
+    writable: false,
+    enumerable: false,
+    configurable: true,
+  });
+
+  node.addEventListener = function(type, fn) {
+    if (fn == null) return;
+    const t = String(type);
+    if (!node._listeners[t]) node._listeners[t] = [];
+    if (!node._listeners[t].includes(fn)) node._listeners[t].push(fn);
+  };
+
+  node.removeEventListener = function(type, fn) {
+    const t = String(type);
+    if (!node._listeners[t]) return;
+    node._listeners[t] = node._listeners[t].filter(f => f !== fn);
+  };
+
+  node.dispatchEvent = function(event) {
+    if (!event) return true;
+    const rec = node._doc?._recorder ?? null;
+    const cfn = node._doc?._callFn   ?? null;
+    return dispatchEventOnNode(node, event, rec, cfn);
   };
 
   return node;
@@ -359,20 +497,89 @@ function cloneVNode(node, deep) {
   return clone;
 }
 
+// ── イベントディスパッチ ──────────────────────────────────────────────────────
+
+/**
+ * target からバブリングチェーンを辿ってリスナーを呼び出す。
+ * callFn が null の場合（テスト等）は何もしない。
+ */
+function dispatchEventOnNode(target, event, recorder, callFn) {
+  if (!event || !callFn) return true;
+
+  const type    = String(event.type ?? '');
+  const bubbles = event.bubbles !== false;
+
+  event.target            = target;
+  event._stopped          = false;
+  event._stoppedImmediate = false;
+  event._defaultPrevented = false;
+
+  // バブリングチェーン: target → parent 列 → document → window
+  const chain = [];
+  let n = target;
+  while (n) {
+    chain.push(n);
+    n = n._parent ?? null;
+  }
+  const doc = target._doc ?? null;
+  if (doc) chain.push(doc);
+  const win = doc?._window ?? null;
+  if (win) chain.push(win);
+
+  for (let i = 0; i < chain.length; i++) {
+    if (i > 0 && !bubbles) break;
+    if (event._stopped) break;
+
+    const current = chain[i];
+    event.currentTarget = current;
+
+    const listeners = current._listeners?.[type];
+    if (listeners && listeners.length > 0) {
+      for (const fn of [...listeners]) {
+        if (event._stoppedImmediate) break;
+        const callDepth = recorder ? recorder.callStack.length : 0;
+        callFn(fn, [event], current, recorder, 0, callDepth,
+               { line: 0, column: 0 });
+      }
+    }
+  }
+
+  return !event._defaultPrevented;
+}
+
 // ── querySelector / querySelectorAll ─────────────────────────────────────────
 
 /**
- * 単純なセレクタのみ対応:
- *   #id    → id 属性一致
- *   .cls   → className に含まれる
- *   tag    → tagName 一致（大文字小文字不問）
+ * 単純セレクタ（スペースなし・結合子なし）に対応:
+ *   tag              tagName 一致
+ *   #id              id 一致
+ *   .class           className に含まれる
+ *   tag.class        tag かつ class（複合）
+ *   tag#id           tag かつ id（複合）
+ *   .cls1.cls2       複数クラス（すべて含む）
+ *   tag.cls1.cls2    tag かつ複数クラス
  */
 function matchesSelector(node, selector) {
   if (node.nodeType !== 1) return false;
   const s = selector.trim();
-  if (s.startsWith('#')) return node.id === s.slice(1);
-  if (s.startsWith('.')) return node.className.split(/\s+/).includes(s.slice(1));
-  return node.tagName === s.toUpperCase();
+
+  // タグ部分（先頭の英字列）と修飾子部分（.class / #id）に分割
+  const tagMatch = s.match(/^[a-zA-Z][a-zA-Z0-9]*/);
+  const tagPart  = tagMatch ? tagMatch[0] : '';
+  const rest     = s.slice(tagPart.length);
+
+  if (tagPart && node.tagName !== tagPart.toUpperCase()) return false;
+
+  const modifiers = rest.match(/[.#][^.#]*/g) ?? [];
+  for (const mod of modifiers) {
+    if (mod.startsWith('#')) {
+      if (node.id !== mod.slice(1)) return false;
+    } else if (mod.startsWith('.')) {
+      if (!node.className.split(/\s+/).includes(mod.slice(1))) return false;
+    }
+  }
+
+  return true;
 }
 
 function queryOne(root, selector) {
@@ -393,7 +600,12 @@ function queryAll(root, selector, result) {
 
 // ── VirtualDocument ───────────────────────────────────────────────────────────
 
-function createVirtualDocument() {
+/**
+ * VirtualDocument を生成する。
+ * @param {object|null} recorder  Recorder インスタンス（DOM モード時に渡す）
+ * @param {Function|null} callFn  interpreter.js の callFunction（イベント発火用）
+ */
+function createVirtualDocument(recorder = null, callFn = null) {
   // HTML > HEAD / BODY の最小ツリーを初期化
   const htmlEl = makeVNode('HTML', null);
   const headEl = makeVNode('HEAD', null);
@@ -408,6 +620,20 @@ function createVirtualDocument() {
     head: headEl,
     body: bodyEl,
   };
+
+  // _recorder / _callFn / _window / _listeners は非列挙（スナップショット・deepClone に含めない）
+  Object.defineProperty(doc, '_recorder', {
+    value: recorder, writable: true, enumerable: false, configurable: true,
+  });
+  Object.defineProperty(doc, '_callFn', {
+    value: callFn, writable: true, enumerable: false, configurable: true,
+  });
+  Object.defineProperty(doc, '_window', {
+    value: null, writable: true, enumerable: false, configurable: true,
+  });
+  Object.defineProperty(doc, '_listeners', {
+    value: Object.create(null), writable: false, enumerable: false, configurable: true,
+  });
 
   // _doc の後付け設定
   htmlEl._doc = doc;
@@ -444,6 +670,26 @@ function createVirtualDocument() {
     doc.body.innerHTML = String(htmlString ?? '');
   };
 
+  // ── document レベルのイベントリスナー ──────────────────────────────────────
+
+  doc.addEventListener = function(type, fn) {
+    if (fn == null) return;
+    const t = String(type);
+    if (!doc._listeners[t]) doc._listeners[t] = [];
+    if (!doc._listeners[t].includes(fn)) doc._listeners[t].push(fn);
+  };
+
+  doc.removeEventListener = function(type, fn) {
+    const t = String(type);
+    if (!doc._listeners[t]) return;
+    doc._listeners[t] = doc._listeners[t].filter(f => f !== fn);
+  };
+
+  doc.dispatchEvent = function(event) {
+    if (!event) return true;
+    return dispatchEventOnNode(doc, event, doc._recorder, doc._callFn);
+  };
+
   return doc;
 }
 
@@ -454,7 +700,7 @@ function serializeVNode(node) {
   if (node.nodeType === 3) {
     return { nodeType: 3, __vnode_id__: node.__vnode_id__, text: node._text };
   }
-  return {
+  const snap = {
     nodeType: 1,
     __vnode_id__: node.__vnode_id__,
     tagName: node.tagName,
@@ -464,6 +710,111 @@ function serializeVNode(node) {
     attributes: { ...node._attributes },
     children: node._children.map(serializeVNode).filter(Boolean),
   };
+  // フォーム要素の動的プロパティ（JS から直接セットされた場合）
+  if (typeof node.value   === 'string')  snap.value   = node.value;
+  if (typeof node.checked === 'boolean') snap.checked = node.checked;
+  return snap;
+}
+
+// ── イベントシーケンス スケルトン生成 ──────────────────────────────────────────
+
+/**
+ * VirtualDocument を走査してリスナー登録済み要素を収集し、
+ * イベントシーケンスのスケルトン配列を生成する。
+ * @param {object} vdom VirtualDocument
+ * @returns {Array<{type:string, target:string, description:string}>}
+ */
+export function generateEventSequenceSkeleton(vdom) {
+  if (!vdom) return [];
+  const entries = [];
+
+  function selectorFor(node) {
+    if (node.id) return `#${node.id}`;
+    const tag = node.tagName.toLowerCase();
+    const cls = node.className ? node.className.split(/\s+/).filter(Boolean) : [];
+    if (cls.length) return `${tag}.${cls[0]}`;
+    return tag;
+  }
+
+  function shortLabel(node) {
+    const text = gatherText(node._children || []).trim().slice(0, 15);
+    if (text)       return `「${text}」`;
+    const ph = node._attributes?.placeholder ?? '';
+    if (ph)         return `「${ph}」`;
+    if (node.id)    return `#${node.id}`;
+    const tag = node.tagName.toLowerCase();
+    const cls = node.className ? node.className.split(/\s+/).filter(Boolean) : [];
+    if (cls.length) return `<${tag}.${cls[0]}>`;
+    return `<${tag}>`;
+  }
+
+  function descriptionFor(type, node) {
+    const label = shortLabel(node);
+    switch (type) {
+      case 'click':
+      case 'mousedown': {
+        const t  = node.tagName;
+        const it = node._attributes?.type ?? '';
+        if (t === 'BUTTON' || (t === 'INPUT' && it === 'submit'))
+          return `${label}ボタンを左クリック`;
+        if (t === 'A') return `${label}リンクをクリック`;
+        return `${label}を左クリック`;
+      }
+      case 'dblclick':   return `${label}をダブルクリック`;
+      case 'input':      return `${label}に文字列を入力（"value" に入力値を記入）`;
+      case 'change':     return `${label}の値を変更（"value" に変更後の値を記入）`;
+      case 'keydown':    return `${label}でキーを打鍵（"key" を "Enter"/"Tab"/"Escape" 等に変更）`;
+      case 'keyup':      return `${label}でキーアップ（"key" を記入）`;
+      case 'keypress':   return `${label}でキープレス（"key" を記入）`;
+      case 'mouseover':
+      case 'mouseenter': return `${label}をホバー`;
+      case 'mouseout':
+      case 'mouseleave': return `${label}からマウスアウト`;
+      case 'focus':      return `${label}にフォーカス`;
+      case 'blur':       return `${label}のフォーカスアウト`;
+      case 'submit':     return `${label}フォームを送信`;
+      default:           return `${label}で ${type} イベントを発火`;
+    }
+  }
+
+  function extraFields(type) {
+    if (type === 'input' || type === 'change') return { value: '' };
+    if (type === 'keydown' || type === 'keyup' || type === 'keypress') return { key: 'Enter' };
+    return {};
+  }
+
+  function walk(node) {
+    if (!node || node.nodeType !== 1) return;
+    if (node._listeners) {
+      for (const type of Object.keys(node._listeners)) {
+        if (node._listeners[type]?.length > 0) {
+          entries.push({
+            type,
+            target: selectorFor(node),
+            ...extraFields(type),
+            description: descriptionFor(type, node),
+          });
+        }
+      }
+    }
+    for (const child of (node._children ?? [])) walk(child);
+  }
+
+  if (vdom.body) walk(vdom.body);
+
+  if (vdom._listeners) {
+    for (const type of Object.keys(vdom._listeners)) {
+      if (vdom._listeners[type]?.length > 0) {
+        entries.push({
+          type,
+          target: 'document',
+          description: `document の ${type} イベント`,
+        });
+      }
+    }
+  }
+
+  return entries;
 }
 
 export { createVirtualDocument, makeVNode, makeTextNode, serializeVNode };

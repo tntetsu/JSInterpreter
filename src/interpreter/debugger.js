@@ -1,6 +1,6 @@
 import { parse }       from '../parser/parser.js';
 import { evaluate, createGlobalEnv, Recorder, callFunction } from './interpreter.js';
-import { createVirtualDocument, makeVEvent } from './virtual-dom.js';
+import { createVirtualDocument, makeVEvent, generateEventSequenceSkeleton } from './virtual-dom.js';
 
 // ── イベントシーケンス処理 ───────────────────────────────────────────────────
 
@@ -180,6 +180,7 @@ class JSDebugger {
     this.trace       = recorder.trace;        // TraceEvent[]
     this.consoleLogs = recorder.consoleLogs;  // ConsoleLog[]
     this.cursor = 0;                          // 現在位置（0 始まり）
+    this._vdom = options.dom ? recorder.vdom : null;
   }
 
   // ─── 状態参照 ────────────────────────────────────────────────────────────────
@@ -234,6 +235,16 @@ class JSDebugger {
     if (this.trace.length === 0) return undefined;
     const last = this.trace[this.trace.length - 1];
     return last.phase === 'exit' ? last.value : undefined;
+  }
+
+  /**
+   * DOM モード時、初期 JS 実行後の VirtualDOM からリスナー登録済み要素を走査し、
+   * イベントシーケンスのスケルトン配列を返す。
+   * @returns {Array<{type:string,target:string,description:string}>}
+   */
+  getEventSequenceSkeleton() {
+    if (!this._vdom) return [];
+    return generateEventSequenceSkeleton(this._vdom);
   }
 
   // ─── ステップ操作 ────────────────────────────────────────────────────────────
