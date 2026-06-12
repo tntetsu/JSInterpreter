@@ -51,6 +51,9 @@ class JSDebugger {
       recorder.vdom = vdom;
       env.define('document', vdom);
       env.define('window', { document: vdom, __type__: 'VWindow' });
+      if (options.initialBodyHTML) {
+        vdom.parseAndSetBody(String(options.initialBodyHTML));
+      }
     }
 
     evaluate(ast, env, recorder, 0, 0);

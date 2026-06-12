@@ -440,6 +440,10 @@ function createVirtualDocument() {
     return serializeVNode(doc.body);
   };
 
+  doc.parseAndSetBody = function(htmlString) {
+    doc.body.innerHTML = String(htmlString ?? '');
+  };
+
   return doc;
 }
 
