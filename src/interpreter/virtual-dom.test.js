@@ -1,4 +1,4 @@
-import { createVirtualDocument, makeVNode, makeTextNode, serializeVNode, _resetVnodeCounter } from './virtual-dom.js';
+import { createVirtualDocument, makeVNode, makeTextNode, serializeVNode, makeVEvent, _resetVnodeCounter } from './virtual-dom.js';
 import { JSDebugger } from './debugger.js';
 
 beforeEach(() => {
@@ -318,4 +318,243 @@ test('T-32: getElementById は JSDebugger 経由で動作する', () => {
   const flat = {};
   for (const frame of lastEnv) Object.assign(flat, frame);
   expect(flat.ok).toBe(true);
+});
+
+// ── Phase 5: イベントシステム ─────────────────────────────────────────────────
+
+function getLastEnvFlat(dbg) {
+  const flat = {};
+  for (const frame of dbg.trace[dbg.trace.length - 1].env) {
+    Object.assign(flat, frame);
+  }
+  return flat;
+}
+
+test('T-33: addEventListener はリスナーを _listeners に格納する', () => {
+  const doc = createVirtualDocument();
+  const div = doc.createElement('div');
+  const fn = () => {};
+  div.addEventListener('click', fn);
+  expect(div._listeners['click']).toContain(fn);
+});
+
+test('T-34: removeEventListener はリスナーを削除する', () => {
+  const doc = createVirtualDocument();
+  const div = doc.createElement('div');
+  const fn = () => {};
+  div.addEventListener('click', fn);
+  div.removeEventListener('click', fn);
+  expect(div._listeners['click'] ?? []).not.toContain(fn);
+});
+
+test('T-35: dispatchEvent はリスナーを呼び出す', () => {
+  const dbg = new JSDebugger(`
+    let called = false;
+    const div = document.createElement('div');
+    document.body.appendChild(div);
+    div.addEventListener('click', function() { called = true; });
+    div.dispatchEvent(new Event('click'));
+  `, { dom: true });
+  expect(getLastEnvFlat(dbg).called).toBe(true);
+});
+
+test('T-36: dispatchEvent は親ノードにバブリングする', () => {
+  const dbg = new JSDebugger(`
+    let parentCalled = false;
+    const child = document.createElement('span');
+    const parent = document.createElement('div');
+    parent.appendChild(child);
+    document.body.appendChild(parent);
+    parent.addEventListener('click', function() { parentCalled = true; });
+    child.dispatchEvent(new Event('click'));
+  `, { dom: true });
+  expect(getLastEnvFlat(dbg).parentCalled).toBe(true);
+});
+
+test('T-37: stopPropagation でバブリングを止められる', () => {
+  const dbg = new JSDebugger(`
+    let parentCalled = false;
+    const child = document.createElement('span');
+    const parent = document.createElement('div');
+    parent.appendChild(child);
+    document.body.appendChild(parent);
+    child.addEventListener('click', function(e) { e.stopPropagation(); });
+    parent.addEventListener('click', function() { parentCalled = true; });
+    child.dispatchEvent(new Event('click'));
+  `, { dom: true });
+  expect(getLastEnvFlat(dbg).parentCalled).toBe(false);
+});
+
+test('T-38: bubbles:false のイベントはバブリングしない', () => {
+  const dbg = new JSDebugger(`
+    let parentCalled = false;
+    const child = document.createElement('span');
+    const parent = document.createElement('div');
+    parent.appendChild(child);
+    document.body.appendChild(parent);
+    parent.addEventListener('custom', function() { parentCalled = true; });
+    child.dispatchEvent(new Event('custom', { bubbles: false }));
+  `, { dom: true });
+  expect(getLastEnvFlat(dbg).parentCalled).toBe(false);
+});
+
+test('T-39: イベントハンドラの実行がトレースに記録される', () => {
+  const dbg = new JSDebugger(`
+    let count = 0;
+    const btn = document.createElement('button');
+    document.body.appendChild(btn);
+    btn.addEventListener('click', function() { count++; });
+    btn.dispatchEvent(new Event('click'));
+    btn.dispatchEvent(new Event('click'));
+  `, { dom: true });
+  expect(getLastEnvFlat(dbg).count).toBe(2);
+});
+
+test('T-40: new MouseEvent で clientX/Y を持つイベントを生成できる', () => {
+  const dbg = new JSDebugger(`
+    const e = new MouseEvent('click', { clientX: 10, clientY: 20 });
+    const ok = e.type === 'click' && e.clientX === 10 && e.clientY === 20;
+  `, { dom: true });
+  expect(getLastEnvFlat(dbg).ok).toBe(true);
+});
+
+test('T-41: makeVEvent で VEvent オブジェクトを生成できる', () => {
+  const ev = makeVEvent('focus', { bubbles: false, cancelable: false });
+  expect(ev.__type__).toBe('VEvent');
+  expect(ev.type).toBe('focus');
+  expect(ev.bubbles).toBe(false);
+  expect(ev.cancelable).toBe(false);
+  expect(typeof ev.stopPropagation).toBe('function');
+  expect(typeof ev.preventDefault).toBe('function');
+});
+
+test('T-42: document.addEventListener でドキュメントレベルのイベントを受け取れる', () => {
+  const dbg = new JSDebugger(`
+    let docCalled = false;
+    document.addEventListener('click', function() { docCalled = true; });
+    const div = document.createElement('div');
+    document.body.appendChild(div);
+    div.dispatchEvent(new Event('click'));
+  `, { dom: true });
+  expect(getLastEnvFlat(dbg).docCalled).toBe(true);
+});
+
+test('T-43: parentNode / parentElement が正しく返る', () => {
+  const doc = createVirtualDocument();
+  const div = doc.createElement('div');
+  const span = doc.createElement('span');
+  div.appendChild(span);
+  expect(span.parentNode).toBe(div);
+  expect(span.parentElement).toBe(div);
+  expect(div.parentNode).toBeNull();
+});
+
+// ── Phase 7: classList / closest / matches / 複合セレクタ ──────────────────
+
+test('T-44: classList.add でクラスを追加できる', () => {
+  const doc = createVirtualDocument();
+  const li = doc.createElement('li');
+  li.classList.add('active');
+  expect(li.className).toBe('active');
+  li.classList.add('done');
+  expect(li.className).toBe('active done');
+  li.classList.add('active');  // 重複追加なし
+  expect(li.className).toBe('active done');
+});
+
+test('T-45: classList.remove でクラスを削除できる', () => {
+  const doc = createVirtualDocument();
+  const li = doc.createElement('li');
+  li.className = 'active done';
+  li.classList.remove('done');
+  expect(li.className).toBe('active');
+});
+
+test('T-46: classList.toggle でクラスを切り替えられる', () => {
+  const doc = createVirtualDocument();
+  const li = doc.createElement('li');
+  expect(li.classList.toggle('done')).toBe(true);
+  expect(li.className).toBe('done');
+  expect(li.classList.toggle('done')).toBe(false);
+  expect(li.className).toBe('');
+});
+
+test('T-47: classList.contains でクラスの有無を確認できる', () => {
+  const doc = createVirtualDocument();
+  const li = doc.createElement('li');
+  li.className = 'foo bar';
+  expect(li.classList.contains('foo')).toBe(true);
+  expect(li.classList.contains('baz')).toBe(false);
+});
+
+test('T-48: closest() は親チェーンを辿って一致するノードを返す', () => {
+  const doc = createVirtualDocument();
+  const ul  = doc.createElement('ul');
+  const li  = doc.createElement('li');
+  const span = doc.createElement('span');
+  ul.appendChild(li);
+  li.appendChild(span);
+  doc.body.appendChild(ul);
+  expect(span.closest('li')).toBe(li);
+  expect(span.closest('ul')).toBe(ul);
+  expect(span.closest('div')).toBeNull();
+});
+
+test('T-49: matches() はセレクタに一致するか検査する', () => {
+  const doc = createVirtualDocument();
+  const li = doc.createElement('li');
+  li.className = 'done';
+  li.id = 'item1';
+  expect(li.matches('li')).toBe(true);
+  expect(li.matches('.done')).toBe(true);
+  expect(li.matches('li.done')).toBe(true);
+  expect(li.matches('li#item1')).toBe(true);
+  expect(li.matches('.other')).toBe(false);
+  expect(li.matches('div')).toBe(false);
+});
+
+test('T-50: classList.toggle が JSDebugger でトレースされる', () => {
+  const dbg = new JSDebugger(`
+    const li = document.createElement('li');
+    li.className = 'item';
+    document.body.appendChild(li);
+    li.classList.toggle('done');
+    li.classList.toggle('done');
+    li.classList.toggle('done');
+    const hasDone = li.classList.contains('done');
+  `, { dom: true });
+  expect(getLastEnvFlat(dbg).hasDone).toBe(true);
+});
+
+test('T-51: serializeVNode に value プロパティが含まれる', () => {
+  const doc = createVirtualDocument();
+  const input = doc.createElement('input');
+  input.value = 'hello';
+  doc.body.appendChild(input);
+  const snap = serializeVNode(doc.body);
+  expect(snap.children[0].value).toBe('hello');
+});
+
+test('T-52: input.value が JSDebugger + イベントシーケンスで更新される', () => {
+  const dbg = new JSDebugger(`
+    const input = document.getElementById('name');
+    let captured = '';
+    input.addEventListener('input', function(e) {
+      captured = input.value;
+    });
+  `, {
+    dom: true,
+    initialBodyHTML: '<input id="name">',
+    events: [{ type: 'input', target: '#name', value: 'Alice' }],
+  });
+  expect(getLastEnvFlat(dbg).captured).toBe('Alice');
+});
+
+test('T-53: querySelector で複合セレクタ（tag.class）が使える', () => {
+  const doc = createVirtualDocument();
+  const div = doc.createElement('div');
+  div.className = 'box active';
+  doc.body.appendChild(div);
+  expect(doc.querySelector('div.active')).toBe(div);
+  expect(doc.querySelector('div.other')).toBeNull();
 });

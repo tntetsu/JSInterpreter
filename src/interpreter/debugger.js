@@ -1,6 +1,53 @@
 import { parse }       from '../parser/parser.js';
-import { evaluate, createGlobalEnv, Recorder } from './interpreter.js';
-import { createVirtualDocument } from './virtual-dom.js';
+import { evaluate, createGlobalEnv, Recorder, callFunction } from './interpreter.js';
+import { createVirtualDocument, makeVEvent } from './virtual-dom.js';
+
+// ── イベントシーケンス処理 ───────────────────────────────────────────────────
+
+/**
+ * EventDef ひとつを処理して対応する VEvent を生成し、target に dispatchEvent する。
+ * @param {object} def  { type, target, value?, key?, clientX?, ... }
+ * @param {object} vdom VirtualDocument
+ */
+function fireEventDef(def, vdom) {
+  const target = vdom.querySelector(String(def.target ?? ''));
+  if (!target) return;
+
+  const type = String(def.type ?? '');
+
+  // input / change 系: ハンドラ呼び出し前に value をセット
+  if ((type === 'input' || type === 'change') && def.value !== undefined) {
+    target.value = String(def.value);
+  }
+
+  const ev = makeVEvent(type, { bubbles: true });
+
+  if (type === 'click' || type === 'mousedown' || type === 'mouseup'
+      || type === 'mouseover' || type === 'mouseout' || type === 'mouseenter'
+      || type === 'mouseleave') {
+    ev.__type__ = 'VMouseEvent';
+    ev.clientX  = def.clientX ?? 0;
+    ev.clientY  = def.clientY ?? 0;
+    ev.button   = def.button  ?? 0;
+    ev.buttons  = def.buttons ?? 0;
+  } else if (type === 'keydown' || type === 'keyup' || type === 'keypress') {
+    ev.__type__  = 'VKeyboardEvent';
+    ev.key       = def.key      ?? '';
+    ev.code      = def.code     ?? '';
+    ev.keyCode   = def.keyCode  ?? 0;
+    ev.altKey    = def.altKey   ?? false;
+    ev.ctrlKey   = def.ctrlKey  ?? false;
+    ev.shiftKey  = def.shiftKey ?? false;
+    ev.metaKey   = def.metaKey  ?? false;
+  } else if (type === 'input' || type === 'change') {
+    ev.__type__  = 'VInputEvent';
+    ev.data      = def.value    ?? null;
+    ev.inputType = def.inputType ?? '';
+  }
+
+  // recorder / callFunction は _doc から取得されるのでここでは不要
+  target.dispatchEvent(ev);
+}
 
 /**
  * JSDebugger — ステップ実行 API
@@ -47,16 +94,87 @@ class JSDebugger {
     const env      = createGlobalEnv(recorder);   // console を横取り
 
     if (options.dom) {
-      const vdom = createVirtualDocument();
+      const vdom = createVirtualDocument(recorder, callFunction);
       recorder.vdom = vdom;
       env.define('document', vdom);
-      env.define('window', { document: vdom, __type__: 'VWindow' });
+
+      // window オブジェクト（addEventListener/dispatchEvent 付き）
+      const winListeners = Object.create(null);
+      const vwindow = { document: vdom, __type__: 'VWindow' };
+      Object.defineProperty(vwindow, '_listeners', {
+        value: winListeners, writable: false, enumerable: false, configurable: true,
+      });
+      vwindow.addEventListener = function(type, fn) {
+        if (fn == null) return;
+        const t = String(type);
+        if (!winListeners[t]) winListeners[t] = [];
+        if (!winListeners[t].includes(fn)) winListeners[t].push(fn);
+      };
+      vwindow.removeEventListener = function(type, fn) {
+        const t = String(type);
+        if (!winListeners[t]) return;
+        winListeners[t] = winListeners[t].filter(f => f !== fn);
+      };
+      vwindow.dispatchEvent = function(event) {
+        if (!event) return true;
+        event.target = vwindow;
+        const listeners = winListeners[String(event.type ?? '')] ?? [];
+        for (const fn of [...listeners]) {
+          callFunction(fn, [event], vwindow, recorder, 0,
+                       recorder.callStack.length, { line: 0, column: 0 });
+        }
+        return !event._defaultPrevented;
+      };
+      vdom._window = vwindow;
+      env.define('window', vwindow);
+
+      // DOM イベントコンストラクタ
+      env.define('Event', function(type, opts) {
+        return makeVEvent(String(type ?? ''), opts ?? {});
+      });
+      env.define('MouseEvent', function(type, opts) {
+        const ev = makeVEvent(String(type ?? ''), { bubbles: true, ...opts });
+        ev.__type__ = 'VMouseEvent';
+        ev.clientX  = opts?.clientX  ?? 0;
+        ev.clientY  = opts?.clientY  ?? 0;
+        ev.button   = opts?.button   ?? 0;
+        ev.buttons  = opts?.buttons  ?? 0;
+        return ev;
+      });
+      env.define('KeyboardEvent', function(type, opts) {
+        const ev = makeVEvent(String(type ?? ''), opts ?? {});
+        ev.__type__  = 'VKeyboardEvent';
+        ev.key       = opts?.key       ?? '';
+        ev.code      = opts?.code      ?? '';
+        ev.keyCode   = opts?.keyCode   ?? 0;
+        ev.altKey    = opts?.altKey    ?? false;
+        ev.ctrlKey   = opts?.ctrlKey   ?? false;
+        ev.shiftKey  = opts?.shiftKey  ?? false;
+        ev.metaKey   = opts?.metaKey   ?? false;
+        return ev;
+      });
+      env.define('InputEvent', function(type, opts) {
+        const ev = makeVEvent(String(type ?? ''), opts ?? {});
+        ev.__type__  = 'VInputEvent';
+        ev.data      = opts?.data      ?? null;
+        ev.inputType = opts?.inputType ?? '';
+        return ev;
+      });
+
       if (options.initialBodyHTML) {
         vdom.parseAndSetBody(String(options.initialBodyHTML));
       }
     }
 
     evaluate(ast, env, recorder, 0, 0);
+
+    // イベントシーケンスを初期 JS 実行後に順番に同期発火する
+    if (options.dom && Array.isArray(options.events) && options.events.length > 0) {
+      const vdom = recorder.vdom;
+      for (const def of options.events) {
+        fireEventDef(def, vdom);
+      }
+    }
 
     this.ast         = ast;                   // 解析済み AST（制御フロービュー用）
     this.trace       = recorder.trace;        // TraceEvent[]
