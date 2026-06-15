@@ -50,6 +50,38 @@ function fireEventDef(def, vdom) {
 }
 
 /**
+ * maxSteps を超えたときに JSDebugger コンストラクタが throw する例外。
+ * partialTrace / partialAst / partialConsoleLogs に打ち切り時点のデータを保持する。
+ */
+class MaxStepsError extends Error {
+  constructor(maxSteps, source, trace, ast, consoleLogs) {
+    super(`実行が最大ステップ数 ${maxSteps.toLocaleString()} を超えたため打ち切りました`);
+    this.name             = 'MaxStepsError';
+    this.maxSteps         = maxSteps;
+    this.partialSource    = source;
+    this.partialTrace     = trace;
+    this.partialAst       = ast;
+    this.partialConsoleLogs = consoleLogs;
+  }
+}
+
+/**
+ * evaluate() 中に実行時エラーが発生したときに JSDebugger コンストラクタが throw する例外。
+ * エラー発生直前までの部分トレースを保持するため、呼び出し側がエラー前の実行状態を表示できる。
+ */
+class ExecutionError extends Error {
+  constructor(cause, source, trace, ast, consoleLogs) {
+    super(cause?.message ?? String(cause));
+    this.name             = 'ExecutionError';
+    this.cause            = cause;
+    this.partialSource    = source;
+    this.partialTrace     = trace;
+    this.partialAst       = ast;
+    this.partialConsoleLogs = consoleLogs;
+  }
+}
+
+/**
  * JSDebugger — ステップ実行 API
  *
  * 設計：スナップショット配列方式（オムニシェント・デバッグ）
@@ -90,7 +122,7 @@ class JSDebugger {
 
     // ── フェーズ1：記録 ────────────────────────────────────────────────────
     const ast      = parse(source);
-    const recorder = new Recorder();
+    const recorder = new Recorder(this.maxSteps);
     const env      = createGlobalEnv(recorder);   // console を横取り
 
     if (options.dom) {
@@ -166,7 +198,24 @@ class JSDebugger {
       }
     }
 
-    evaluate(ast, env, recorder, 0, 0);
+    try {
+      evaluate(ast, env, recorder, 0, 0);
+    } catch (err) {
+      // 末尾の未完了 enter（matchIdx === -1）を除去してトレースを整理する
+      const tr = recorder.trace;
+      let tail = tr.length - 1;
+      while (tail >= 0 && tr[tail].matchIdx === -1) tail--;
+      tr.length = tail + 1;
+      // 外側コンテナ（Program 等）の matchIdx も trace.length に揃える
+      for (const ev of tr) {
+        if (ev.matchIdx === -1) ev.matchIdx = tr.length;
+      }
+
+      if (/^\[MaxSteps\]/.test(err?.message)) {
+        throw new MaxStepsError(this.maxSteps, source, tr, ast, recorder.consoleLogs);
+      }
+      throw new ExecutionError(err, source, tr, ast, recorder.consoleLogs);
+    }
 
     // イベントシーケンスを初期 JS 実行後に順番に同期発火する
     if (options.dom && Array.isArray(options.events) && options.events.length > 0) {
@@ -535,6 +584,24 @@ class JSDebugger {
     return this._result();
   }
 
+  // ─── 静的ファクトリ ──────────────────────────────────────────────────────────
+
+  /**
+   * 事前計算済みトレースから JSDebugger インスタンスを生成する（evaluate() をバイパス）。
+   * MaxStepsError をキャッチした側が部分トレースを閲覧可能にするために使う。
+   */
+  static fromTrace(source, trace, ast, consoleLogs) {
+    const inst       = Object.create(JSDebugger.prototype);
+    inst.source      = source;
+    inst.maxSteps    = 0;
+    inst.ast         = ast;
+    inst.trace       = trace;
+    inst.consoleLogs = consoleLogs;
+    inst.cursor      = 0;
+    inst._vdom       = null;
+    return inst;
+  }
+
   // ─── 内部ヘルパー ────────────────────────────────────────────────────────────
 
   /**
@@ -550,4 +617,4 @@ class JSDebugger {
   }
 }
 
-export { JSDebugger };
+export { JSDebugger, MaxStepsError, ExecutionError };

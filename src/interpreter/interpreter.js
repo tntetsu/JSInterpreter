@@ -38,12 +38,13 @@ function formatLogArg(v, depth = 0) {
 }
 
 class Recorder {
-  constructor() {
+  constructor(maxSteps = 0) {
     this.trace = [];          // TraceEvent[]
     this.callStack = [];      // Frame[]  { name, loc, args }
     this.consoleLogs = [];    // { atIndex: number, level: string, text: string }
     this.frameEnvStack = [];  // Environment[]  各アクティブフレームの callEnv（push 順 = 外→内）
     this.vdom = null;         // VirtualDocument | null（DOM モード時に JSDebugger がセット）
+    this.maxSteps = maxSteps; // 0 = 無制限
   }
 
   /**
@@ -69,6 +70,9 @@ class Recorder {
    * fn() の戻り値を返す。
    */
   record(node, env, depth, callDepth, fn) {
+    if (this.maxSteps > 0 && this.trace.length >= this.maxSteps) {
+      throw new RangeError('[MaxSteps] 最大ステップ数を超えました');
+    }
     // 各アクティブフレームの callEnv を現時点でスナップショット（外→内の順）
     const frameEnvs = this.frameEnvStack.map(e => e.snapshotOwn());
 
