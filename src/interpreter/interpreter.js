@@ -287,34 +287,32 @@ function createGlobalEnv(recorder = null) {
 
 /**
  * try ブロックでホスト例外が発生したとき、トレース配列を整理する。
- * try ブロック内で完了した文（enter/exit ペアが揃った文レベルのノード）のイベントは残し、
- * 失敗した文以降（未完了の enter が末尾に残るイベント列）だけを除去する。
- * BlockStatement 自体の enter は残して matchIdx を「exit なし」の位置に更新する。
+ *
+ * 戦略: debugger.js の ExecutionError 後処理と同じ 2 ステップ方式を
+ * try ブロック範囲（blockTraceStart 以降）に限定して適用する。
+ *
+ * ① 末尾から走査し、完了した子ノードを一切持たない dangling enter
+ *    （matchIdx === -1 のまま残っているイベント）を除去する。
+ *    ※ 完了した子を持つ enter（例: null.foo の null リテラルが評価済みの
+ *      MemberExpression enter）はそのまま残す。
+ *
+ * ② 残存する matchIdx === -1 のイベントを tr.length（＝catch ブロック先頭）
+ *    に更新する。これにより stepOver でキャッチブロック先頭へ正しくジャンプする。
+ *
+ * 結果として「失敗した文の enter とその評価途中のサブ式」がトレースに残り、
+ * 式ステップで部分評価を確認でき、humanStep の rule ⑥b が停止点を追加できる。
  */
 function _trimFailedTryBlock(tr, blockTraceStart) {
-  if (tr.length <= blockTraceStart) return; // try ブロックにイベントなし
+  if (tr.length <= blockTraceStart) return;
 
-  // tr[blockTraceStart] は BlockStatement_try の enter。
-  // その depth + 1 が「文レベル」の depth。
-  const stmtDepth = tr[blockTraceStart].depth + 1;
+  // ① 末尾の dangling enter を除去
+  let tail = tr.length - 1;
+  while (tail >= blockTraceStart && tr[tail].matchIdx === -1) tail--;
+  tr.length = tail + 1;
 
-  // 文レベルで完了している最後の exit イベントを探す。
-  let lastGoodIdx = -1;
-  for (let j = blockTraceStart + 1; j < tr.length; j++) {
-    const ev = tr[j];
-    if (ev.phase === 'exit' && ev.depth === stmtDepth && ev.matchIdx >= 0 && ev.matchIdx < j) {
-      lastGoodIdx = j;
-    }
-  }
-
-  if (lastGoodIdx >= 0) {
-    // 成功した文まで残し、失敗した文以降を除去する。
-    // BlockStatement_try enter の matchIdx を「exit なし（範囲外）」に更新する。
-    tr.length = lastGoodIdx + 1;
-    tr[blockTraceStart].matchIdx = tr.length;
-  } else {
-    // try ブロック内で完了した文がひとつもない場合はすべて除去する。
-    tr.length = blockTraceStart;
+  // ② 残った matchIdx === -1 を catch ブロック先頭に更新
+  for (let j = blockTraceStart; j < tr.length; j++) {
+    if (tr[j].matchIdx === -1) tr[j].matchIdx = tr.length;
   }
 }
 

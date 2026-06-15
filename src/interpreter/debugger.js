@@ -529,6 +529,25 @@ class JSDebugger {
       }
     }
 
+    // ⑥b 失敗した ExpressionStatement（対応する exit が存在しない）
+    //    try ブロック内でホスト例外が発生した場合、失敗した文の
+    //    enter イベントは残るが exit イベントは存在しない。
+    //    matchIdx が正常な exit(ExpressionStatement) を指していない enter を
+    //    humanStep の停止点として追加する。
+    //    これにより「式ボタンで部分評価を確認→人/文ボタンで停止」が可能になる。
+    for (let i = 0; i < trace.length; i++) {
+      const ev = trace[i];
+      if (ev.phase === 'enter' && ev.nodeType === 'ExpressionStatement') {
+        const m = ev.matchIdx;
+        const hasProperExit = m >= 0
+          && m < trace.length
+          && trace[m].phase === 'exit'
+          && trace[m].nodeType === 'ExpressionStatement'
+          && trace[m].matchIdx === i;
+        if (!hasProperExit) set.add(i);
+      }
+    }
+
     this._humanIndices = set;
     return set;
   }
