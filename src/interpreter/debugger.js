@@ -512,6 +512,23 @@ class JSDebugger {
       }
     }
 
+    // ⑥ ExpressionStatement：ネイティブ関数呼び出し等の「文として実行する式」
+    //    内部に既存の humanSet メンバーが存在しない ExpressionStatement の exit を追加する。
+    //    ユーザー定義関数呼び出し（rule②）や代入（rule①）が内部にある場合は
+    //    そちらで既に停止するため追加しない（二重停止を防ぐ）。
+    for (let i = 0; i < trace.length; i++) {
+      const ev = trace[i];
+      if (ev.phase === 'exit' && ev.nodeType === 'ExpressionStatement') {
+        const enterIdx = ev.matchIdx;
+        if (enterIdx < 0 || enterIdx >= trace.length) continue;
+        let hasInner = false;
+        for (let j = enterIdx + 1; j < i; j++) {
+          if (set.has(j)) { hasInner = true; break; }
+        }
+        if (!hasInner) set.add(i);
+      }
+    }
+
     this._humanIndices = set;
     return set;
   }
