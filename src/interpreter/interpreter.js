@@ -376,17 +376,9 @@ function _eval(node, env, recorder, depth, callDepth) {
         // [MaxSteps] は JSDebugger まで伝播させる（ユーザーコードで catch 不可）
         if (/^\[MaxSteps\]/.test(hostErr?.message)) throw hostErr;
         // ホスト例外（RuntimeError・TypeError 等）をゲスト ThrowSignal に変換する。
-        // これにより `catch (e) { ... }` ブロックがホスト例外を受け取れるようになる。
-        // また、try ブロック内で出口イベントが積まれなかった未完了 enter を除去する。
-        if (recorder) {
-          const tr = recorder.trace;
-          let tail = tr.length - 1;
-          while (tail >= blockTraceStart && tr[tail].matchIdx === -1) tail--;
-          tr.length = tail + 1;
-          for (let i = blockTraceStart; i < tr.length; i++) {
-            if (tr[i].matchIdx === -1) tr[i].matchIdx = tr.length;
-          }
-        }
+        // try ブロック内のイベントはすべて除去する（中途半端な matchIdx が残ると
+        // stepOver/humanStep が catch ブロックを飛ばしてしまうため）。
+        if (recorder) recorder.trace.length = blockTraceStart;
         result = new ThrowSignal(hostErr);
       }
       if (result instanceof ThrowSignal && node.handler) {
