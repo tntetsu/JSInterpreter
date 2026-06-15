@@ -71,7 +71,7 @@ class Recorder {
    */
   record(node, env, depth, callDepth, fn) {
     if (this.maxSteps > 0 && this.trace.length >= this.maxSteps) {
-      throw new RangeError('[MaxSteps] 最大ステップ数を超えました');
+      throw new RangeError(`[MaxSteps] 実行が最大ステップ数 ${this.maxSteps.toLocaleString()} を超えたため停止しました`);
     }
     // 各アクティブフレームの callEnv を現時点でスナップショット（外→内の順）
     const frameEnvs = this.frameEnvStack.map(e => e.snapshotOwn());

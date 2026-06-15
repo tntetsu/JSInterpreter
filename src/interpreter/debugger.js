@@ -50,28 +50,17 @@ function fireEventDef(def, vdom) {
 }
 
 /**
- * maxSteps を超えたときに JSDebugger コンストラクタが throw する例外。
- * partialTrace / partialAst / partialConsoleLogs に打ち切り時点のデータを保持する。
- */
-class MaxStepsError extends Error {
-  constructor(maxSteps, source, trace, ast, consoleLogs) {
-    super(`実行が最大ステップ数 ${maxSteps.toLocaleString()} を超えたため打ち切りました`);
-    this.name             = 'MaxStepsError';
-    this.maxSteps         = maxSteps;
-    this.partialSource    = source;
-    this.partialTrace     = trace;
-    this.partialAst       = ast;
-    this.partialConsoleLogs = consoleLogs;
-  }
-}
-
-/**
- * evaluate() 中に実行時エラーが発生したときに JSDebugger コンストラクタが throw する例外。
+ * evaluate() 中に実行時エラー（maxSteps 超過を含む）が発生したときに
+ * JSDebugger コンストラクタが throw する例外。
  * エラー発生直前までの部分トレースを保持するため、呼び出し側がエラー前の実行状態を表示できる。
+ *
+ * maxSteps 超過エラー（[MaxSteps] プレフィックス）はここで自動的にプレフィックスを除去し、
+ * ゼロ除算・スタックオーバーフロー等の組み込みエラーと同等の実行エラーとして扱う。
  */
 class ExecutionError extends Error {
   constructor(cause, source, trace, ast, consoleLogs) {
-    super(cause?.message ?? String(cause));
+    const rawMsg = cause?.message ?? String(cause);
+    super(rawMsg.replace(/^\[MaxSteps\]\s*/, ''));
     this.name             = 'ExecutionError';
     this.cause            = cause;
     this.partialSource    = source;
@@ -211,9 +200,6 @@ class JSDebugger {
         if (ev.matchIdx === -1) ev.matchIdx = tr.length;
       }
 
-      if (/^\[MaxSteps\]/.test(err?.message)) {
-        throw new MaxStepsError(this.maxSteps, source, tr, ast, recorder.consoleLogs);
-      }
       throw new ExecutionError(err, source, tr, ast, recorder.consoleLogs);
     }
 
@@ -617,4 +603,4 @@ class JSDebugger {
   }
 }
 
-export { JSDebugger, MaxStepsError, ExecutionError };
+export { JSDebugger, ExecutionError };
