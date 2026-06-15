@@ -284,6 +284,40 @@ function createGlobalEnv(recorder = null) {
  * @param {number} depth     ASTネスト深さ
  * @param {number} callDepth 関数呼び出し深さ
  */
+
+/**
+ * try ブロックでホスト例外が発生したとき、トレース配列を整理する。
+ * try ブロック内で完了した文（enter/exit ペアが揃った文レベルのノード）のイベントは残し、
+ * 失敗した文以降（未完了の enter が末尾に残るイベント列）だけを除去する。
+ * BlockStatement 自体の enter は残して matchIdx を「exit なし」の位置に更新する。
+ */
+function _trimFailedTryBlock(tr, blockTraceStart) {
+  if (tr.length <= blockTraceStart) return; // try ブロックにイベントなし
+
+  // tr[blockTraceStart] は BlockStatement_try の enter。
+  // その depth + 1 が「文レベル」の depth。
+  const stmtDepth = tr[blockTraceStart].depth + 1;
+
+  // 文レベルで完了している最後の exit イベントを探す。
+  let lastGoodIdx = -1;
+  for (let j = blockTraceStart + 1; j < tr.length; j++) {
+    const ev = tr[j];
+    if (ev.phase === 'exit' && ev.depth === stmtDepth && ev.matchIdx >= 0 && ev.matchIdx < j) {
+      lastGoodIdx = j;
+    }
+  }
+
+  if (lastGoodIdx >= 0) {
+    // 成功した文まで残し、失敗した文以降を除去する。
+    // BlockStatement_try enter の matchIdx を「exit なし（範囲外）」に更新する。
+    tr.length = lastGoodIdx + 1;
+    tr[blockTraceStart].matchIdx = tr.length;
+  } else {
+    // try ブロック内で完了した文がひとつもない場合はすべて除去する。
+    tr.length = blockTraceStart;
+  }
+}
+
 function evaluate(node, env, recorder = null, depth = 0, callDepth = 0) {
   if (!node) return undefined;
 
@@ -376,9 +410,9 @@ function _eval(node, env, recorder, depth, callDepth) {
         // [MaxSteps] は JSDebugger まで伝播させる（ユーザーコードで catch 不可）
         if (/^\[MaxSteps\]/.test(hostErr?.message)) throw hostErr;
         // ホスト例外（RuntimeError・TypeError 等）をゲスト ThrowSignal に変換する。
-        // try ブロック内のイベントはすべて除去する（中途半端な matchIdx が残ると
-        // stepOver/humanStep が catch ブロックを飛ばしてしまうため）。
-        if (recorder) recorder.trace.length = blockTraceStart;
+        // 成功した文のトレースイベントは残し、失敗した文（未完了の enter が末尾に残る）
+        // 以降だけを除去して matchIdx の整合性を保つ。
+        if (recorder) _trimFailedTryBlock(recorder.trace, blockTraceStart);
         result = new ThrowSignal(hostErr);
       }
       if (result instanceof ThrowSignal && node.handler) {
