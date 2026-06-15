@@ -367,7 +367,28 @@ function _eval(node, env, recorder, depth, callDepth) {
 
     // ── try-catch-finally ─────────────────────────────────────────────────────
     case 'TryStatement': {
-      let result = evaluate(node.block, env, recorder, d, callDepth);
+      // blockTraceStart: try ブロック評価開始前のトレース末尾位置（後処理用）
+      const blockTraceStart = recorder ? recorder.trace.length : 0;
+      let result;
+      try {
+        result = evaluate(node.block, env, recorder, d, callDepth);
+      } catch (hostErr) {
+        // [MaxSteps] は JSDebugger まで伝播させる（ユーザーコードで catch 不可）
+        if (/^\[MaxSteps\]/.test(hostErr?.message)) throw hostErr;
+        // ホスト例外（RuntimeError・TypeError 等）をゲスト ThrowSignal に変換する。
+        // これにより `catch (e) { ... }` ブロックがホスト例外を受け取れるようになる。
+        // また、try ブロック内で出口イベントが積まれなかった未完了 enter を除去する。
+        if (recorder) {
+          const tr = recorder.trace;
+          let tail = tr.length - 1;
+          while (tail >= blockTraceStart && tr[tail].matchIdx === -1) tail--;
+          tr.length = tail + 1;
+          for (let i = blockTraceStart; i < tr.length; i++) {
+            if (tr[i].matchIdx === -1) tr[i].matchIdx = tr.length;
+          }
+        }
+        result = new ThrowSignal(hostErr);
+      }
       if (result instanceof ThrowSignal && node.handler) {
         const catchEnv = new Environment(env);
         if (node.handler.param) bindPattern(node.handler.param, result.value, catchEnv, recorder, d, callDepth);
