@@ -1,9 +1,9 @@
 # Functional Specification
 
 **Project**: JSInterpreter  
-**Version**: 1.1.0  
+**Version**: 1.2.0  
 **Created**: 2026-05-24  
-**Updated**: 2026-06-04  
+**Updated**: 2026-06-16  
 **Audience**: Product owners, developers, testers
 
 > 🌐 [日本語版](functional-specification.ja.md)
@@ -56,7 +56,11 @@ User (developer / learner)
 
 ### 3.1 Variable Declarations
 
-- `let`, `const`, `var`
+- `let`, `const`, `var` — scoping rules faithfully implemented:
+  - `var` — function-scoped (escapes blocks), hoisted (pre-defined as `undefined`)
+  - `let` — block-scoped, TDZ (accessing before declaration throws RuntimeError), re-declaration in same scope throws RuntimeError
+  - `const` — block-scoped, TDZ, reassignment (`=`, `+=`, `++`, etc.) throws RuntimeError
+- `for (let i = 0; ...)` per-iteration binding — closures correctly capture the value at each iteration
 - Multiple declarations (`let a = 1, b = 2`)
 - Object destructuring (`let { x, y } = obj`)
 - Array destructuring (`let [a, b] = arr`)
@@ -446,11 +450,12 @@ All errors are printed as human-readable messages **without** a stack trace.
 
 All features are covered by unit tests. Test files are co-located with their source files. Explicit `expect(result).toBe(...)` assertions are used; snapshot tests are not.
 
-**Test breakdown (187 total):**
+**Test breakdown (249 total):**
 
 | File | Count |
 |------|-------|
 | `src/lexer/lexer.test.js` | 45 |
 | `src/parser/parser.test.js` | 42 |
 | `src/interpreter/interpreter.test.js` | 52 |
-| `src/interpreter/debugger.test.js` | 48 |
+| `src/interpreter/debugger.test.js` | 52 |
+| `src/interpreter/virtual-dom.test.js` | 58 |

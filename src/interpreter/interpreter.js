@@ -1,4 +1,4 @@
-import { Environment, deepClone } from './environment.js';
+import { Environment, deepClone, TDZ_SENTINEL } from './environment.js';
 import { RuntimeError } from '../errors.js';
 import { parse } from '../parser/parser.js';
 
@@ -187,10 +187,181 @@ function createJSPromiseFromExecutor(executor, recorder, depth, callDepth, loc) 
   return { __type__: 'JSPromise', status, value: resolvedValue, reason: rejectedReason };
 }
 
+// ─── var 巻き上げ ────────────────────────────────────────────────────────────
+
+/**
+ * 関数ボディ（または Program）を先読みし、var 宣言を funcEnv に undefined で事前定義する。
+ * ネストした FunctionDeclaration/Expression/Arrow には入らない（var は最近傍関数スコープまで）。
+ */
+function hoistVars(node, funcEnv) {
+  if (!node) return;
+  switch (node.type) {
+    case 'VariableDeclaration':
+      if (node.kind === 'var') {
+        for (const decl of node.declarations) hoistIdent(decl.id, funcEnv);
+      }
+      break;
+    case 'FunctionDeclaration':
+    case 'FunctionExpression':
+    case 'ArrowFunctionExpression':
+      break; // ネストした関数ボディには入らない
+    case 'Program':
+    case 'BlockStatement':
+      for (const stmt of node.body) hoistVars(stmt, funcEnv);
+      break;
+    case 'IfStatement':
+      hoistVars(node.consequent, funcEnv);
+      hoistVars(node.alternate, funcEnv);
+      break;
+    case 'WhileStatement':
+    case 'DoWhileStatement':
+      hoistVars(node.body, funcEnv);
+      break;
+    case 'ForStatement':
+      if (node.init) hoistVars(node.init, funcEnv);
+      hoistVars(node.body, funcEnv);
+      break;
+    case 'ForOfStatement':
+    case 'ForInStatement':
+      if (node.left?.type === 'VariableDeclaration' && node.left.kind === 'var') {
+        for (const decl of node.left.declarations) hoistIdent(decl.id, funcEnv);
+      }
+      hoistVars(node.body, funcEnv);
+      break;
+    case 'TryStatement':
+      hoistVars(node.block, funcEnv);
+      if (node.handler) hoistVars(node.handler.body, funcEnv);
+      if (node.finalizer) hoistVars(node.finalizer, funcEnv);
+      break;
+    case 'LabeledStatement':
+      hoistVars(node.body, funcEnv);
+      break;
+  }
+}
+
+/** const 宣言のパターンに含まれる識別子をすべて immutable としてマークする。 */
+function markConstNames(pattern, env) {
+  if (!pattern) return;
+  if (pattern.type === 'Identifier') {
+    env.markConst(pattern.name);
+  } else if (pattern.type === 'ArrayPattern') {
+    for (const elem of pattern.elements) {
+      if (!elem) continue;
+      markConstNames(elem.type === 'AssignmentPattern' ? elem.left : elem, env);
+    }
+  } else if (pattern.type === 'ObjectPattern') {
+    for (const prop of pattern.properties) {
+      if (prop.type === 'RestElement') {
+        markConstNames(prop.argument, env);
+      } else {
+        markConstNames(prop.value.type === 'AssignmentPattern' ? prop.value.left : prop.value, env);
+      }
+    }
+  }
+}
+
+/**
+ * ブロックの直接の子文を走査し、let/const 宣言をすべて TDZ_SENTINEL で事前定義する。
+ * ネストしたブロック内の宣言はそのブロック自身が処理するため、ここでは再帰しない。
+ */
+function hoistLexicals(node, env) {
+  const body = Array.isArray(node.body) ? node.body : (node.body ? [node.body] : []);
+  for (const stmt of body) {
+    if (stmt?.type === 'VariableDeclaration' && stmt.kind !== 'var') {
+      for (const decl of stmt.declarations) hoistLexicalIdent(decl.id, env);
+    }
+  }
+}
+
+function hoistLexicalIdent(pattern, env) {
+  if (!pattern) return;
+  if (pattern.type === 'Identifier') {
+    if (!env.bindings.has(pattern.name)) env.define(pattern.name, TDZ_SENTINEL);
+  } else if (pattern.type === 'ArrayPattern') {
+    for (const elem of pattern.elements) {
+      if (!elem) continue;
+      hoistLexicalIdent(elem.type === 'AssignmentPattern' ? elem.left : elem, env);
+    }
+  } else if (pattern.type === 'ObjectPattern') {
+    for (const prop of pattern.properties) {
+      if (prop.type === 'RestElement') {
+        hoistLexicalIdent(prop.argument, env);
+      } else {
+        hoistLexicalIdent(prop.value.type === 'AssignmentPattern' ? prop.value.left : prop.value, env);
+      }
+    }
+  }
+}
+
+/** let/const の同一スコープ再宣言を検出する。TDZ プレースホルダーは再宣言とみなさない。 */
+function checkNoRedecl(pattern, env) {
+  if (!pattern) return;
+  if (pattern.type === 'Identifier') {
+    if (env.bindings.has(pattern.name) && env.bindings.get(pattern.name) !== TDZ_SENTINEL) {
+      throw new RuntimeError(`識別子 '${pattern.name}' はすでに宣言されています`);
+    }
+  } else if (pattern.type === 'ArrayPattern') {
+    for (const elem of pattern.elements) {
+      if (!elem) continue;
+      checkNoRedecl(elem.type === 'AssignmentPattern' ? elem.left : elem, env);
+    }
+  } else if (pattern.type === 'ObjectPattern') {
+    for (const prop of pattern.properties) {
+      if (prop.type === 'RestElement') {
+        checkNoRedecl(prop.argument, env);
+      } else {
+        checkNoRedecl(prop.value.type === 'AssignmentPattern' ? prop.value.left : prop.value, env);
+      }
+    }
+  }
+}
+
+/** パターンに含まれる識別子名を配列で返す（for-let per-iteration binding 用）。 */
+function getPatternNames(pattern, names = []) {
+  if (!pattern) return names;
+  if (pattern.type === 'Identifier') {
+    names.push(pattern.name);
+  } else if (pattern.type === 'ArrayPattern') {
+    for (const elem of pattern.elements) {
+      if (!elem) continue;
+      getPatternNames(elem.type === 'AssignmentPattern' ? elem.left : elem, names);
+    }
+  } else if (pattern.type === 'ObjectPattern') {
+    for (const prop of pattern.properties) {
+      if (prop.type === 'RestElement') {
+        getPatternNames(prop.argument, names);
+      } else {
+        getPatternNames(prop.value.type === 'AssignmentPattern' ? prop.value.left : prop.value, names);
+      }
+    }
+  }
+  return names;
+}
+
+function hoistIdent(pattern, env) {
+  if (!pattern) return;
+  if (pattern.type === 'Identifier') {
+    if (!env.bindings.has(pattern.name)) env.define(pattern.name, undefined);
+  } else if (pattern.type === 'ArrayPattern') {
+    for (const elem of pattern.elements) {
+      if (!elem) continue;
+      hoistIdent(elem.type === 'AssignmentPattern' ? elem.left : elem, env);
+    }
+  } else if (pattern.type === 'ObjectPattern') {
+    for (const prop of pattern.properties) {
+      if (prop.type === 'RestElement') {
+        hoistIdent(prop.argument, env);
+      } else {
+        hoistIdent(prop.value.type === 'AssignmentPattern' ? prop.value.left : prop.value, env);
+      }
+    }
+  }
+}
+
 // ─── 組み込みグローバル ────────────────────────────────────────────────────────
 
 function createGlobalEnv(recorder = null) {
-  const env = new Environment(null);
+  const env = new Environment(null, 'global');
 
   env.define('undefined', undefined);
   env.define('NaN', NaN);
@@ -335,6 +506,8 @@ function _eval(node, env, recorder, depth, callDepth) {
 
     // ── プログラム ────────────────────────────────────────────────────────────
     case 'Program': {
+      hoistVars(node, env);
+      hoistLexicals(node, env);
       let result;
       for (const stmt of node.body) {
         result = evaluate(stmt, env, recorder, d, callDepth);
@@ -348,7 +521,8 @@ function _eval(node, env, recorder, depth, callDepth) {
 
     // ── ブロック ──────────────────────────────────────────────────────────────
     case 'BlockStatement': {
-      const blockEnv = new Environment(env);
+      const blockEnv = new Environment(env, 'block');
+      hoistLexicals(node, blockEnv);
       let result;
       for (const stmt of node.body) {
         result = evaluate(stmt, blockEnv, recorder, d, callDepth);
@@ -362,10 +536,14 @@ function _eval(node, env, recorder, depth, callDepth) {
 
     // ── 変数宣言 ──────────────────────────────────────────────────────────────
     case 'VariableDeclaration': {
+      // var は関数スコープ（またはグローバルスコープ）へ、let/const は現在のブロックスコープへ
+      const targetEnv = node.kind === 'var' ? env.getFunctionScope() : env;
       for (const decl of node.declarations) {
+        if (node.kind !== 'var') checkNoRedecl(decl.id, targetEnv);
         const val = decl.init ? evaluate(decl.init, env, recorder, d, callDepth) : undefined;
         if (val instanceof ThrowSignal) return val;
-        bindPattern(decl.id, val, env, recorder, d, callDepth);
+        bindPattern(decl.id, val, targetEnv, recorder, d, callDepth);
+        if (node.kind === 'const') markConstNames(decl.id, targetEnv);
       }
       return undefined;
     }
@@ -457,13 +635,43 @@ function _eval(node, env, recorder, depth, callDepth) {
 
     // ── for ───────────────────────────────────────────────────────────────────
     case 'ForStatement': {
-      const forEnv = new Environment(env);
+      const forEnv = new Environment(env, 'block');
       if (node.init) evaluate(node.init, forEnv, recorder, d, callDepth);
+
+      // for (let/const x = ...) はイテレーションごとに独立したスコープを作る
+      const isLexicalFor = node.init?.type === 'VariableDeclaration' && node.init.kind !== 'var';
+      const loopVars = isLexicalFor
+        ? node.init.declarations.flatMap(decl => getPatternNames(decl.id))
+        : [];
+
       while (!node.test || isTruthy(evaluate(node.test, forEnv, recorder, d, callDepth))) {
-        const result = evaluate(node.body, forEnv, recorder, d, callDepth);
-        if (result instanceof BreakSignal)    break;
+        // per-iteration scope: クロージャが各イテレーションの値を独立してキャプチャできる
+        let iterEnv = forEnv;
+        if (isLexicalFor) {
+          iterEnv = new Environment(env, 'block');
+          for (const name of loopVars) iterEnv.define(name, forEnv.bindings.get(name));
+        }
+
+        const result = evaluate(node.body, iterEnv, recorder, d, callDepth);
+        if (result instanceof BreakSignal) break;
         if (result instanceof ReturnSignal || result instanceof ThrowSignal) return result;
-        if (node.update) evaluate(node.update, forEnv, recorder, d, callDepth);
+        // ContinueSignal はそのまま update へ落ちる
+
+        if (node.update) {
+          if (isLexicalFor) {
+            // update は iterEnv のコピー（updateEnv）で実行する。
+            // これにより、iterEnv（クロージャが参照するスコープ）が update によって
+            // 書き換えられず、クロージャはイテレーション開始時の値を保持できる。
+            const updateEnv = new Environment(env, 'block');
+            for (const name of loopVars) updateEnv.define(name, iterEnv.bindings.get(name));
+            evaluate(node.update, updateEnv, recorder, d, callDepth);
+            for (const name of loopVars) {
+              if (updateEnv.bindings.has(name)) forEnv.bindings.set(name, updateEnv.bindings.get(name));
+            }
+          } else {
+            evaluate(node.update, forEnv, recorder, d, callDepth);
+          }
+        }
       }
       return undefined;
     }
@@ -928,7 +1136,9 @@ function bindPattern(pattern, value, env, recorder, depth, callDepth) {
 function bindForLeft(left, value, env, recorder, depth, callDepth) {
   if (left.type === 'VariableDeclaration') {
     const decl = left.declarations[0];
-    bindPattern(decl.id, value, env, recorder, depth, callDepth);
+    const targetEnv = left.kind === 'var' ? env.getFunctionScope() : env;
+    bindPattern(decl.id, value, targetEnv, recorder, depth, callDepth);
+    if (left.kind === 'const') markConstNames(decl.id, targetEnv);
   } else {
     assignTo(left, value, env, recorder, depth, callDepth);
   }
@@ -960,7 +1170,7 @@ function callFunction(callee, args, thisValue, recorder, depth, callDepth, loc) 
     catch (e) { return new ThrowSignal(e); }
   }
   if (callee && callee.__type__ === 'JSFunction') {
-    const callEnv = new Environment(callee.closure);
+    const callEnv = new Environment(callee.closure, 'function');
     if (thisValue !== undefined) callEnv.define('this', thisValue);
     // パラメーターバインド
     bindParams(callee.params, args, callEnv, recorder, depth, callDepth);
@@ -977,6 +1187,9 @@ function callFunction(callee, args, thisValue, recorder, depth, callDepth, loc) 
       // このフレームの callEnv を frameEnvStack に登録（スコープ表示用）
       recorder.frameEnvStack.push(callEnv);
     }
+
+    // var 宣言を関数スコープに事前定義（巻き上げ）
+    if (!callee.expression) hoistVars(callee.body, callEnv);
 
     // 関数ボディは呼び出し深さを +1 して評価する
     const bodyCallDepth = callDepth + 1;

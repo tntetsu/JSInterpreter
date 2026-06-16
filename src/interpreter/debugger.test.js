@@ -1,4 +1,5 @@
 import { JSDebugger } from './debugger.js';
+import { TDZ_SENTINEL } from './environment.js';
 
 // ヘルパー：cursor を特定ノード型 & フェーズまで進める
 function advanceTo(dbg, nodeType, phase = 'enter') {
@@ -67,8 +68,8 @@ describe('JSDebugger', () => {
     test('enter の env は評価前の状態', () => {
       const dbg = new JSDebugger('let x = 99;');
       const vdEnter = dbg.trace.find(e => e.nodeType === 'VariableDeclaration' && e.phase === 'enter');
-      // 変数宣言の enter 時点では x はまだ定義されていない
-      expect(vdEnter.env[0]).not.toHaveProperty('x');
+      // TDZ: enter 時点では x は TDZ_SENTINEL（未初期化）であり 99 ではない
+      expect(vdEnter.env[0].x).toBe(TDZ_SENTINEL);
     });
   });
 

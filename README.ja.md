@@ -226,7 +226,7 @@ const stack = dbg.getCallStack();
 
 | カテゴリ | 構文 |
 |---------|------|
-| 変数 | `let` `const` `var`、分割代入（オブジェクト・配列）、デフォルト値 |
+| 変数 | `var`（関数スコープ・巻き上げ）`let`（ブロックスコープ・TDZ・再宣言禁止）`const`（ブロックスコープ・TDZ・再代入禁止）、`for (let …)` イテレーション独立バインディング、分割代入（オブジェクト・配列）、デフォルト値 |
 | 関数 | 関数宣言・式・アロー関数・**async 関数**、レスト引数、デフォルト引数、クロージャ、再帰 |
 | 非同期 | `async function`、`async () =>`、`await`、`Promise.resolve/reject/all/allSettled/race/any`、`new Promise(executor)` |
 | 制御フロー | `if/else`、`while`、`do...while`、`for`、`for...of`、`for...in`、`break/continue`、`return` |
@@ -278,7 +278,7 @@ npx jest src/interpreter/debugger.test.js
 npm run test:watch
 ```
 
-テストは 4 ファイル・187 件です。
+テストは 5 ファイル・249 件です。
 
 ## 既知の制限・未実装機能
 

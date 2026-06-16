@@ -1,9 +1,9 @@
 # 詳細設計書
 
 **プロジェクト名**: JSInterpreter  
-**バージョン**: 1.1.0  
+**バージョン**: 1.2.0  
 **作成日**: 2026-05-24  
-**最終更新**: 2026-06-04  
+**最終更新**: 2026-06-16  
 **対象読者**: 実装者・コードレビュアー
 
 > 🌐 [English version](detailed-design.md)
@@ -54,7 +54,7 @@ src/
 │   ├── parser.js         Parser, parse()
 │   └── parser.test.js
 ├── interpreter/
-│   ├── environment.js    Environment, deepClone
+│   ├── environment.js    Environment, deepClone, TDZ_SENTINEL
 │   ├── interpreter.js    evaluate(), run(), record(), Recorder
 │   ├── interpreter.test.js
 │   ├── debugger.js       JSDebugger
@@ -348,28 +348,34 @@ parseAssignment():
 
 ```
 Environment {
-  bindings: Map<string, any>   // 変数名 → 値
-  parent:   Environment | null // 外側スコープ
+  bindings:   Map<string, any>   // 変数名 → 値（TDZ_SENTINEL を含む）
+  immutables: Set<string>        // const として宣言された変数名
+  parent:     Environment | null // 外側スコープ
+  kind:       'block' | 'function' | 'global'  // スコープ種別
 }
 ```
 
 スコープチェーンは単方向連結リストとして構成される。
 
 ```
-グローバル環境（parent: null）
+グローバル環境（parent: null, kind: 'global'）
     ↑
-関数スコープ（parent: グローバル）
+関数スコープ（parent: グローバル, kind: 'function'）
     ↑
-ブロックスコープ（parent: 関数）  ← 現在
+ブロックスコープ（parent: 関数, kind: 'block'）  ← 現在
 ```
+
+`TDZ_SENTINEL = Symbol('TDZ')` は `let`/`const` 宣言前のアクセスを検出するためのプレースホルダー値。`hoistLexicals()` によって宣言前に `bindings` へ登録され、`get()` でこの値を検出すると RuntimeError を投げる。
 
 ### 4.2 メソッド
 
 | メソッド | 説明 | 計算量 |
 |--------|------|--------|
 | `define(name, value)` | 現在スコープに変数を定義 | O(1) |
-| `get(name, loc)` | チェーンを上方向に探索して値を返す | O(深さ) |
-| `set(name, value, loc)` | チェーンを上方向に探索して代入 | O(深さ) |
+| `get(name, loc)` | チェーンを上方向に探索して値を返す。TDZ_SENTINEL なら「初期化前アクセス」エラー | O(深さ) |
+| `set(name, value, loc)` | チェーンを上方向に探索して代入。`immutables` に含まれる名前なら「const 再代入」エラー | O(深さ) |
+| `getFunctionScope()` | `kind === 'block'` のスコープを飛び越え、最近傍の `function`/`global` スコープを返す（`var` の宣言先解決に使用） | O(ネスト深さ) |
+| `markConst(name)` | `immutables` に追加する（`const` 宣言後に呼ぶ） | O(1) |
 | `snapshot()` | スコープチェーン全体をディープクローンで返す | O(スコープ数 × 変数数) |
 
 ### 4.3 snapshot の形式と deepClone
@@ -471,13 +477,14 @@ callFunction(callee, args, thisValue, recorder, depth, callDepth, loc):
     → ネイティブ関数：callee.apply(thisValue, args)
 
   if callee.__type__ === 'JSFunction':
-    1. callEnv = new Environment(callee.closure)
+    1. callEnv = new Environment(callee.closure, 'function')
     2. thisValue があれば callEnv.define('this', thisValue)
     3. パラメーターをバインド（bindParams）
     4. recorder.callStack に push
-    5. body を evaluate(depth, callDepth+1) で評価
-    6. recorder.callStack から pop
-    7. async 処理（下記参照）
+    5. hoistVars(callee.body, callEnv)  // var 巻き上げ
+    6. body を evaluate(depth, callDepth+1) で評価
+    7. recorder.callStack から pop
+    8. async 処理（下記参照）
 ```
 
 **async 関数の戻り値ラッピング**:
@@ -511,6 +518,48 @@ CallExpression を評価する _eval は:
 callFunction の中で:
   bodyCallDepth = callDepth + 1           ← 関数ボディは +1
   evaluate(body, callEnv, recorder, depth, bodyCallDepth)
+```
+
+### 5.4b var/let/const のスコープ実装
+
+#### var の巻き上げと関数スコープ
+
+`hoistVars(node, funcEnv)` は関数ボディ（または Program）を事前走査し、`var` 宣言で使用するすべての識別子を `funcEnv`（`kind === 'function'` または `'global'`）に `undefined` で事前定義する。ネストした関数ボディには入らない。
+
+`VariableDeclaration` 評価時、`node.kind === 'var'` なら `env.getFunctionScope()` を使ってブロックスコープを飛び越えた関数スコープに変数を定義する。これにより `if`/`for` などのブロック内の `var` が関数スコープに昇格する。
+
+#### let/const の TDZ と再宣言防止
+
+`hoistLexicals(node, env)` はブロックの直接の子文だけを走査し、`let`/`const` 宣言の識別子を `TDZ_SENTINEL` で事前定義する（ネストしたブロックは走査しない）。`BlockStatement` のたびに呼び出される。
+
+```
+BlockStatement に入る
+  → blockEnv = new Environment(env, 'block')
+  → hoistLexicals(node, blockEnv)   // let/const を TDZ_SENTINEL で登録
+  → for stmt of node.body: evaluate(stmt, blockEnv)
+```
+
+`VariableDeclaration`（`let`/`const`）が実行されると：
+1. `checkNoRedecl(id, targetEnv)` — バインディングが存在し `TDZ_SENTINEL` でない場合はエラー（再宣言）
+2. `bindPattern(id, val, targetEnv)` — TDZ を実値で上書き
+3. `const` の場合は `markConstNames(id, targetEnv)` で `immutables` に登録
+
+#### for (let …) のイテレーション独立バインディング
+
+`for (let/const …)` の場合、各イテレーション開始時に `iterEnv = new Environment(env, 'block')` を生成してループ変数をコピーする。ボディ内のクロージャは `iterEnv` をキャプチャするため、異なるイテレーションの値を独立して保持できる。
+
+update 式は `iterEnv` とは別の `updateEnv` で実行する（`iterEnv` のコピー）。これにより update による変数書き換えがクロージャの参照する `iterEnv` に波及しない。update 後の値は `forEnv`（ループ全体の「ヘッダー」スコープ）に書き戻し、次のイテレーションの `test` 評価に使用する。
+
+```
+for (let i = 0; i < n; i++)  // isLexicalFor = true
+  forEnv.i = 0  (init)
+  loop:
+    test → forEnv.i
+    iterEnv.i = forEnv.i     // コピー（クロージャはこれをキャプチャ）
+    body(iterEnv)
+    updateEnv.i = iterEnv.i  // コピー（iterEnv を変更しない）
+    i++ in updateEnv → updateEnv.i = 1
+    forEnv.i = 1             // 書き戻し
 ```
 
 ### 5.5 関数オブジェクトの表現

@@ -1,9 +1,9 @@
 # Detailed Design
 
 **Project**: JSInterpreter  
-**Version**: 1.1.0  
+**Version**: 1.2.0  
 **Created**: 2026-05-24  
-**Updated**: 2026-06-04  
+**Updated**: 2026-06-16  
 **Audience**: Implementers, code reviewers
 
 > 🌐 [日本語版](detailed-design.ja.md)
@@ -54,7 +54,7 @@ src/
 │   ├── parser.js         Parser, parse()
 │   └── parser.test.js
 ├── interpreter/
-│   ├── environment.js    Environment, deepClone
+│   ├── environment.js    Environment, deepClone, TDZ_SENTINEL
 │   ├── interpreter.js    evaluate(), run(), record(), Recorder
 │   ├── interpreter.test.js
 │   ├── debugger.js       JSDebugger
@@ -348,28 +348,34 @@ parseAssignment():
 
 ```
 Environment {
-  bindings: Map<string, any>   // Variable name → value
-  parent:   Environment | null // Enclosing scope
+  bindings:   Map<string, any>   // Variable name → value (may contain TDZ_SENTINEL)
+  immutables: Set<string>        // Names declared with const
+  parent:     Environment | null // Enclosing scope
+  kind:       'block' | 'function' | 'global'  // Scope kind
 }
 ```
 
 The scope chain is a singly-linked list:
 
 ```
-Global environment (parent: null)
+Global environment (parent: null, kind: 'global')
     ↑
-Function scope (parent: global)
+Function scope (parent: global, kind: 'function')
     ↑
-Block scope (parent: function)  ← current
+Block scope (parent: function, kind: 'block')  ← current
 ```
+
+`TDZ_SENTINEL = Symbol('TDZ')` is a placeholder value pre-installed by `hoistLexicals()` for `let`/`const` identifiers before their declaration is reached. `get()` detects this sentinel and throws a RuntimeError ("cannot access before initialization").
 
 ### 4.2 Methods
 
 | Method | Description | Complexity |
 |--------|-------------|------------|
 | `define(name, value)` | Define a variable in the current scope | O(1) |
-| `get(name, loc)` | Walk the chain upward to find a value | O(depth) |
-| `set(name, value, loc)` | Walk the chain upward to assign a value | O(depth) |
+| `get(name, loc)` | Walk the chain upward; throws if TDZ_SENTINEL or undefined | O(depth) |
+| `set(name, value, loc)` | Walk the chain upward to assign; throws if name is in `immutables` | O(depth) |
+| `getFunctionScope()` | Skip `'block'` scopes and return the nearest `'function'` or `'global'` scope (used by `var`) | O(nesting depth) |
+| `markConst(name)` | Add name to `immutables` (called after binding a `const` declaration) | O(1) |
 | `snapshot()` | Return a deep-cloned snapshot of the full scope chain | O(scopes × bindings) |
 
 ### 4.3 Snapshot Format and Deep Clone
@@ -471,13 +477,14 @@ callFunction(callee, args, thisValue, recorder, depth, callDepth, loc):
     → Native function: callee.apply(thisValue, args)
 
   if callee.__type__ === 'JSFunction':
-    1. callEnv = new Environment(callee.closure)
+    1. callEnv = new Environment(callee.closure, 'function')
     2. If thisValue, define 'this' in callEnv
     3. Bind parameters (bindParams)
     4. Push frame onto recorder.callStack
-    5. evaluate body with (depth, callDepth+1)
-    6. Pop frame from recorder.callStack
-    7. Wrap result for async (see below)
+    5. hoistVars(callee.body, callEnv)  // hoist var declarations
+    6. evaluate body with (depth, callDepth+1)
+    7. Pop frame from recorder.callStack
+    8. Wrap result for async (see below)
 ```
 
 **Async return value wrapping**:
@@ -511,6 +518,48 @@ _eval evaluating CallExpression:
 Inside callFunction:
   bodyCallDepth = callDepth + 1            // function body gets +1
   evaluate(body, callEnv, recorder, depth, bodyCallDepth)
+```
+
+### 5.4b var/let/const Scope Implementation
+
+#### var hoisting and function scope
+
+`hoistVars(node, funcEnv)` pre-scans the function body (or Program) and pre-defines every `var`-declared identifier in `funcEnv` (a `'function'` or `'global'` scope) as `undefined`. It does not recurse into nested function bodies.
+
+At `VariableDeclaration` evaluation time, if `node.kind === 'var'`, the binding target is `env.getFunctionScope()` — skipping any intermediate `'block'` scopes. This makes `var` inside `if`/`for`/`while` blocks escape to the enclosing function scope.
+
+#### let/const TDZ and redeclaration guard
+
+`hoistLexicals(node, env)` scans only the direct children of a block and pre-defines `let`/`const` identifiers as `TDZ_SENTINEL` (without recursing into nested blocks). It is called every time `BlockStatement` creates a new block environment.
+
+```
+Enter BlockStatement:
+  blockEnv = new Environment(env, 'block')
+  hoistLexicals(node, blockEnv)    // register let/const as TDZ_SENTINEL
+  for stmt of node.body: evaluate(stmt, blockEnv)
+```
+
+When the `VariableDeclaration` for `let`/`const` is reached:
+1. `checkNoRedecl(id, targetEnv)` — throws if binding already exists and is not `TDZ_SENTINEL` (redeclaration)
+2. `bindPattern(id, val, targetEnv)` — overwrites TDZ_SENTINEL with the real value
+3. For `const`: `markConstNames(id, targetEnv)` adds names to `immutables`
+
+#### for (let …) per-iteration binding
+
+For `for (let/const …)` loops, a new `iterEnv` is created at the start of each iteration and the loop variables are copied from `forEnv` (the loop-header scope). Closures inside the body capture `iterEnv` rather than `forEnv`, so each iteration's captured value is independent.
+
+The update expression runs in a separate `updateEnv` (a copy of `iterEnv`), ensuring that the update does not mutate `iterEnv` (and therefore does not affect the closure's captured value). After the update, the new value is written back to `forEnv` for the next iteration's `test`.
+
+```
+for (let i = 0; i < n; i++)   // isLexicalFor = true
+  forEnv.i = 0   (init)
+  loop:
+    test → forEnv.i
+    iterEnv.i = forEnv.i       // copy (closures capture this)
+    body(iterEnv)
+    updateEnv.i = iterEnv.i    // copy (keeps iterEnv unchanged)
+    i++ in updateEnv → updateEnv.i = 1
+    forEnv.i = 1               // write-back for next test
 ```
 
 ### 5.5 Function Object Representation

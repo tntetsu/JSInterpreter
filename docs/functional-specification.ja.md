@@ -1,9 +1,9 @@
 # 機能仕様書
 
 **プロジェクト名**: JSInterpreter  
-**バージョン**: 1.1.0  
+**バージョン**: 1.2.0  
 **作成日**: 2026-05-24  
-**最終更新**: 2026-06-04  
+**最終更新**: 2026-06-16  
 **対象読者**: プロダクトオーナー・開発者・テスター
 
 > 🌐 [English version](functional-specification.md)
@@ -58,7 +58,11 @@ JSInterpreter は JavaScript で書かれた JavaScript インタープリター
 
 ### 3.1 変数宣言
 
-- `let`、`const`、`var` による変数宣言
+- `let`、`const`、`var` による変数宣言（スコープ規則を忠実に実装）
+  - `var` — 関数スコープ（ブロックを脱出）・巻き上げ（`undefined` で事前定義）
+  - `let` — ブロックスコープ・TDZ（宣言前アクセスは RuntimeError）・同一スコープ再宣言は RuntimeError
+  - `const` — ブロックスコープ・TDZ・再代入（`=` `+=` `++` 等）は RuntimeError
+- `for (let i = 0; ...)` のイテレーションごとの独立バインディング（クロージャが各イテレーションの値を正しくキャプチャ）
 - 複数同時宣言（`let a = 1, b = 2`）
 - オブジェクト分割代入（`let { x, y } = obj`）
 - 配列分割代入（`let [a, b] = arr`）
@@ -424,11 +428,12 @@ VariableDeclaration・ReturnStatement・ThrowStatement は値を表示しない�
 
 全機能はユニットテストでカバーする。スナップショットテストは使用しない。
 
-**テスト内訳（合計 187 件）:**
+**テスト内訳（合計 249 件）:**
 
 | ファイル | テスト数 |
 |---------|---------|
 | `src/lexer/lexer.test.js` | 45 |
 | `src/parser/parser.test.js` | 42 |
 | `src/interpreter/interpreter.test.js` | 52 |
-| `src/interpreter/debugger.test.js` | 48 |
+| `src/interpreter/debugger.test.js` | 52 |
+| `src/interpreter/virtual-dom.test.js` | 58 |

@@ -226,7 +226,7 @@ Each step carries:
 
 | Category | Syntax |
 |----------|--------|
-| Variables | `let` `const` `var`, destructuring (object/array), default values |
+| Variables | `var` (function-scoped, hoisted), `let` (block-scoped, TDZ, no redecl), `const` (block-scoped, TDZ, immutable), `for (let …)` per-iteration binding, destructuring (object/array), default values |
 | Functions | Declarations, expressions, arrow functions, **async functions**, rest params, default params, closures, recursion |
 | Async | `async function`, `async () =>`, `await`, `Promise.resolve/reject/all/allSettled/race/any`, `new Promise(executor)` |
 | Control flow | `if/else`, `while`, `do...while`, `for`, `for...of`, `for...in`, `break/continue`, `return` |
@@ -278,7 +278,7 @@ npx jest src/interpreter/debugger.test.js
 npm run test:watch
 ```
 
-187 tests across 4 files.
+249 tests across 5 files.
 
 ## Known Limitations
 
