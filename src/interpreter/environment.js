@@ -114,8 +114,9 @@ class Environment {
    */
   snapshotOwn() {
     const frame = {};
+    const seen = new WeakMap();
     for (const [k, v] of this.bindings) {
-      frame[k] = deepClone(v);
+      frame[k] = deepClone(v, seen);
     }
     return frame;
   }
@@ -127,15 +128,20 @@ class Environment {
    * オブジェクト・配列の内部状態を再帰的にコピーするため、
    * stepBack 時にオブジェクトの変更履歴が正確に反映される。
    *
+   * seen WeakMap をスコープチェーン全体で共有することで、
+   * 同じ元オブジェクトが複数の変数から参照される場合に
+   * 同一のクローンが再利用される（オブジェクト同一性の保持）。
+   *
    * @returns {Array<Object>} [localScope, ..., globalScope] の順の配列
    */
   snapshot() {
     const frames = [];
+    const seen = new WeakMap();
     let cur = this;
     while (cur) {
       const frame = {};
       for (const [k, v] of cur.bindings) {
-        frame[k] = deepClone(v);
+        frame[k] = deepClone(v, seen);
       }
       frames.push(frame);
       cur = cur.parent;
