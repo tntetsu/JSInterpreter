@@ -471,6 +471,36 @@ if (val instanceof ThrowSignal) return val;
 
 ### 5.4 関数呼び出し
 
+**CallExpression 側の callee/thisValue 決定**（2026-08-05 修正）:
+
+`node.callee` が `MemberExpression`/`OptionalMemberExpression`（`obj.method(...)` 形式）のとき、
+`node.callee.object`（レシーバー式）を**一度だけ**評価し、その結果を `callee`（プロパティ値）と
+`thisValue` の両方に使い回す。
+
+```
+node.callee.type === 'MemberExpression' の場合:
+  obj = evaluate(node.callee.object, ...)   // ここで1回だけ評価
+  callee = obj[key]
+  thisValue = obj
+それ以外:
+  callee = evaluate(node.callee, ...)
+```
+
+修正前は `callee = evaluate(node.callee, ...)`（内部で `node.callee.object` を評価）と、
+`thisValue = evaluate(node.callee.object, ...)` の2箇所で `node.callee.object` を独立に評価しており、
+`result.concat(a).concat(b)` のような連鎖呼び出しでレシーバー式に副作用があると二重実行されていた
+（JSVisualizer 側のトレース記録も重複し、ステップ実行の表示が壊れる原因になっていた）。
+
+**ゲスト関数のネイティブコールバック変換**（2026-08-05 追加）:
+
+`callee` がネイティブ関数（`typeof callee === 'function'`、`Array.prototype.sort` 等）のとき、
+引数に含まれる `JSFunction`（ゲスト定義の関数値、プレーンオブジェクト）はそのままではネイティブ側
+から呼び出せないため、`wrapGuestFunction(jsFn, recorder, depth, callDepth, loc)` でラップする。
+ラッパーは呼び出し時に `callFunction(jsFn, nativeArgs, undefined, ...)` を実行し、結果が
+`ThrowSignal` ならホスト例外として re-throw する（`callFunction` のネイティブ分岐の
+`try { callee.apply(...) } catch (e) { return new ThrowSignal(e) }` で再度捕捉され、
+往復が成立する）。
+
 ```
 callFunction(callee, args, thisValue, recorder, depth, callDepth, loc):
   if typeof callee === 'function':
@@ -1206,10 +1236,11 @@ const e = event.end.column;        // 0-based 終端位置（exclusive）
 |-------------|------|---------|
 | `src/lexer/lexer.test.js` | Lexer | 45 |
 | `src/parser/parser.test.js` | Parser | 42 |
-| `src/interpreter/interpreter.test.js` | Interpreter・Recorder | 52 |
-| `src/interpreter/debugger.test.js` | JSDebugger | 48 |
+| `src/interpreter/interpreter.test.js` | Interpreter・Recorder | 55 |
+| `src/interpreter/debugger.test.js` | JSDebugger | 52 |
+| `src/interpreter/virtual-dom.test.js` | VirtualDOM | 58 |
 
-**合計: 187テスト**
+**合計: 252テスト**
 
 ### 9.2 デバッガーテストの方針
 

@@ -471,6 +471,37 @@ if (val instanceof ThrowSignal) return val;
 
 ### 5.4 Function Calls
 
+**Determining callee/thisValue on the CallExpression side** (fixed 2026-08-05):
+
+When `node.callee` is a `MemberExpression`/`OptionalMemberExpression` (`obj.method(...)` form),
+`node.callee.object` (the receiver expression) is evaluated **exactly once**, and the result is
+reused for both `callee` (the property value) and `thisValue`.
+
+```
+if node.callee.type === 'MemberExpression':
+  obj = evaluate(node.callee.object, ...)   // evaluated once here
+  callee = obj[key]
+  thisValue = obj
+else:
+  callee = evaluate(node.callee, ...)
+```
+
+Previously, `callee = evaluate(node.callee, ...)` (which internally evaluates `node.callee.object`)
+and `thisValue = evaluate(node.callee.object, ...)` evaluated `node.callee.object` independently in
+two places. For chained calls with a side-effecting receiver, such as `result.concat(a).concat(b)`,
+the receiver expression was executed twice (and JSVisualizer's trace recording was duplicated as a
+result, corrupting the step-execution display).
+
+**Wrapping guest functions as native callbacks** (added 2026-08-05):
+
+When `callee` is a native function (`typeof callee === 'function'`, e.g. `Array.prototype.sort`), any
+`JSFunction` (a guest-defined function value, a plain object) among the arguments cannot be invoked
+directly by native code, so it is wrapped via
+`wrapGuestFunction(jsFn, recorder, depth, callDepth, loc)`. The wrapper invokes
+`callFunction(jsFn, nativeArgs, undefined, ...)` when called, and re-throws as a host exception if the
+result is a `ThrowSignal` (which the native branch of `callFunction` — `try { callee.apply(...) } catch
+(e) { return new ThrowSignal(e) }` — catches again, completing the round trip).
+
 ```
 callFunction(callee, args, thisValue, recorder, depth, callDepth, loc):
   if typeof callee === 'function':
@@ -1204,10 +1235,11 @@ Variable snapshots are obtained via `getMergedVars(event)` (same logic as `rende
 |-----------|---------|-------|
 | `src/lexer/lexer.test.js` | Lexer | 45 |
 | `src/parser/parser.test.js` | Parser | 42 |
-| `src/interpreter/interpreter.test.js` | Interpreter / Recorder | 52 |
-| `src/interpreter/debugger.test.js` | JSDebugger | 48 |
+| `src/interpreter/interpreter.test.js` | Interpreter / Recorder | 55 |
+| `src/interpreter/debugger.test.js` | JSDebugger | 52 |
+| `src/interpreter/virtual-dom.test.js` | VirtualDOM | 58 |
 
-**Total: 187 tests**
+**Total: 252 tests**
 
 ### 9.2 Debugger Test Policy
 

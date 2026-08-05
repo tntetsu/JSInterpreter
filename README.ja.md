@@ -278,7 +278,7 @@ npx jest src/interpreter/debugger.test.js
 npm run test:watch
 ```
 
-テストは 5 ファイル・249 件です。
+テストは 5 ファイル・252 件です。
 
 ## 既知の制限・未実装機能
 

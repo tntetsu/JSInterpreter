@@ -278,7 +278,7 @@ npx jest src/interpreter/debugger.test.js
 npm run test:watch
 ```
 
-249 tests across 5 files.
+252 tests across 5 files.
 
 ## Known Limitations
 

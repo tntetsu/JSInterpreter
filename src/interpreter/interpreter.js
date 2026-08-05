@@ -874,7 +874,29 @@ function _eval(node, env, recorder, depth, callDepth) {
         return thisObj;
       }
 
-      const callee = evaluate(node.callee, env, recorder, d, callDepth);
+      // callee の決定。MemberExpression（obj.method(...) 形式）のときは
+      // object を一度だけ評価し、callee（プロパティ値）と thisValue の両方に使い回す。
+      // 従来は evaluate(node.callee, ...) と thisValue 用の evaluate(node.callee.object, ...)
+      // の2箇所で node.callee.object を独立に評価しており、副作用（メソッド呼び出し等）や
+      // トレース記録が重複していた（例: result.concat(a).concat(b) の内側呼び出しが2回実行される）。
+      let callee, thisValue;
+      if (node.callee.type === 'MemberExpression' || node.callee.type === 'OptionalMemberExpression') {
+        const obj = evaluate(node.callee.object, env, recorder, d, callDepth);
+        if ((obj === null || obj === undefined) && node.callee.type === 'OptionalMemberExpression') {
+          callee = undefined;
+        } else if (obj === null || obj === undefined) {
+          throw new RuntimeError(`null/undefined のプロパティアクセス`, node.callee.loc);
+        } else {
+          const key = node.callee.computed
+            ? evaluate(node.callee.property, env, recorder, d, callDepth)
+            : node.callee.property.name;
+          callee = obj[key];
+          thisValue = obj;
+        }
+      } else {
+        callee = evaluate(node.callee, env, recorder, d, callDepth);
+      }
+
       if (callee === undefined || callee === null) {
         if (node.type === 'OptionalCallExpression') return undefined;
         throw new RuntimeError(`呼び出し不能な値: ${jsToString(callee)}`, node.loc);
@@ -889,10 +911,16 @@ function _eval(node, env, recorder, depth, callDepth) {
         }
       }
 
-      // thisValue の決定
-      let thisValue = undefined;
-      if (node.callee.type === 'MemberExpression' || node.callee.type === 'OptionalMemberExpression') {
-        thisValue = evaluate(node.callee.object, env, recorder, d, callDepth);
+      // ネイティブ関数（配列メソッド等）にゲスト関数をコールバックとして渡す場合、
+      // JSFunction はプレーンオブジェクトのままではネイティブ側から呼び出せない
+      // （例: arr.sort((a,b) => ...) で TypeError になる）。ネイティブから呼び出し
+      // 可能なラッパー関数に変換する。
+      if (typeof callee === 'function') {
+        for (let i = 0; i < args.length; i++) {
+          if (args[i] && args[i].__type__ === 'JSFunction') {
+            args[i] = wrapGuestFunction(args[i], recorder, d, callDepth, node.loc);
+          }
+        }
       }
 
       return callFunction(callee, args, thisValue, recorder, d, callDepth, node.loc);
@@ -1158,6 +1186,21 @@ function makeFunction(node, closureEnv, name) {
     expression: node.expression || false,
     async: node.async || false,
     closure: closureEnv,
+  };
+}
+
+/**
+ * JSFunction（ゲスト関数オブジェクト）をネイティブから呼び出し可能な関数に変換する。
+ * Array.prototype.sort のコールバック等、ネイティブ関数にゲスト関数を渡す場合に使用する。
+ * ゲスト関数内で throw された値は ThrowSignal に包まれて返るため、ホスト例外として
+ * 再送出する（callFunction のネイティブ分岐が catch して ThrowSignal に戻すため、
+ * try-catch を経由した往復が成立する）。
+ */
+function wrapGuestFunction(jsFn, recorder, depth, callDepth, loc) {
+  return (...nativeArgs) => {
+    const result = callFunction(jsFn, nativeArgs, undefined, recorder, depth, callDepth, loc);
+    if (result instanceof ThrowSignal) throw result.value;
+    return result;
   };
 }
 

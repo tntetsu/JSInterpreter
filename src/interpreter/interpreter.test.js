@@ -169,6 +169,30 @@ describe('Interpreter', () => {
     test('配列分割代入', () => {
       expect(run('const [x, y] = [10, 20]; x + y;')).toBe(30);
     });
+
+    test('ゲスト関数（アロー関数）をコールバックとして sort に渡せる', () => {
+      const result = run('const a = [3, 1, 2]; a.sort((x, y) => x - y);');
+      expect(result).toEqual([1, 2, 3]);
+    });
+
+    test('ゲスト関数をコールバックとして sort に渡せる（オブジェクトのプロパティ比較）', () => {
+      const result = run(`
+        const students = [{ name: 'Bob', score: 70 }, { name: 'Al', score: 90 }];
+        students.sort((a, b) => b.score - a.score);
+        students.map(s => s.name);
+      `);
+      expect(result).toEqual(['Al', 'Bob']);
+    });
+
+    test('メソッド呼び出しの連鎖でレシーバーが二重評価されない（副作用の重複防止）', () => {
+      const result = run(`
+        let calls = 0;
+        function tap(arr) { calls++; return arr; }
+        tap([1, 2]).concat([3]).concat([4]);
+        calls;
+      `);
+      expect(result).toBe(1);
+    });
   });
 
   // ── テンプレートリテラル ──────────────────────────────────────────────────────
