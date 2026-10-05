@@ -43,6 +43,40 @@ describe('Lexer', () => {
       expect(Number(tok.lexeme)).toBe(15);
     });
 
+    test('0 始まりの数値（010・08）は strict モードと同じく構文エラー', () => {
+      expect(() => lex('010')).toThrow(/\[Lexer\] 1:1: 0 で始まる8進数リテラル/);
+      expect(() => lex('x = 08')).toThrow(/\[Lexer\] 1:5: 0 で始まる10進数リテラル/);
+      expect(Number(lex('0')[0].lexeme)).toBe(0);
+      expect(Number(lex('0.5')[0].lexeme)).toBe(0.5);
+    });
+
+    test('16進数・8進数・2進数の数値セパレーター', () => {
+      expect(Number(lex('0x1f_ff')[0].lexeme)).toBe(0x1fff);
+      expect(Number(lex('0o1_7')[0].lexeme)).toBe(15);
+      expect(Number(lex('0b1010_1010')[0].lexeme)).toBe(170);
+    });
+
+    test('接頭辞の後に数字がない・不正な数字は構文エラー', () => {
+      expect(() => lex('0x')).toThrow(/不正な数値リテラル/);
+      expect(() => lex('0o9')).toThrow(/不正な数値リテラル/);
+      expect(() => lex('0b12')).toThrow(/不正な数値リテラル/);
+    });
+
+    test('先頭が小数点の数値（.5）', () => {
+      expect(Number(lex('.5')[0].lexeme)).toBe(0.5);
+      expect(Number(lex('.5e2')[0].lexeme)).toBe(50);
+      const toks = lex('a ? .5 : 1');
+      expect(toks[1].type).toBe(TokenType.QUESTION);
+      expect(Number(toks[2].lexeme)).toBe(0.5);
+      expect(lex('a.b')[1].type).toBe(TokenType.DOT);
+    });
+
+    test('8進数エスケープ（\\01・\\7）は構文エラー、\\0 は使える', () => {
+      expect(() => lex("'\\01'")).toThrow(/\[Lexer\] 1:2: 8進数エスケープシーケンス/);
+      expect(() => lex("'\\7'")).toThrow(/8進数エスケープシーケンス/);
+      expect(lex("'a\\0b'")[0].lexeme).toBe('a\0b');
+    });
+
     test('数値セパレーター', () => {
       const [tok] = lex('1_000_000');
       expect(Number(tok.lexeme)).toBe(1000000);

@@ -278,7 +278,7 @@ npx jest src/interpreter/debugger.test.js
 npm run test:watch
 ```
 
-テストは 5 ファイル・252 件です。
+テストは 5 ファイル・257 件です。
 
 ## 既知の制限・未実装機能
 
@@ -310,6 +310,7 @@ npm run test:watch
 | `arguments` オブジェクト | 関数内の `arguments` は未定義。レスト引数（`...args`）で代替 |
 | `WeakRef` / `Proxy` / `Reflect` | グローバルに未登録（必要に応じて追加可能） |
 | モジュール | `import/export` は構文解析のみ（ファイル読み込み・モジュール解決は行わない） |
+| strict モード | 非対応。`"use strict";` は無視され、strict モードと非 strict モードの区別をしない。ただし 0 で始まる数値リテラル（`010`・`08`）と 8 進数エスケープ（`"\01"`）は、非 strict モードでも strict モードと同じく構文エラーにする（教育目的。[ADR-012](docs/adr/ADR-012-strict-mode-numeric-literals.md)） |
 
 ## ドキュメント
 

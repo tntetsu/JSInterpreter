@@ -180,9 +180,19 @@ TEMPLATE_NO_SUB("hello")
 | 16進数 | `0xFF` | `parseInt(raw, 16)` |
 | 8進数 | `0o17` | `parseInt(raw, 8)` |
 | 2進数 | `0b1010` | `parseInt(raw, 2)` |
-| 数値セパレーター | `1_000_000` | `_` を除去してから変換 |
+| 数値セパレーター | `1_000_000`, `0x1f_ff` | `_` を除去してから変換（16進・8進・2進でも可） |
+| 先頭が小数点 | `.5`, `.5e2` | `.` の直後が数字なら `scanNumber()` で数値として読む |
 
 `lexeme` には `Number(raw)` の文字列表現（`String(Number(raw))`）を格納する。
+
+**構文エラー（LexError）にする形式**（strict モードの規則に合わせる。[ADR-012](adr/ADR-012-strict-mode-numeric-literals.md)）:
+
+| 形式 | 例 | メッセージ |
+|------|-----|----------|
+| 0 で始まる8進数（レガシー8進数） | `010` | 0 で始まる8進数リテラル（010 など）は使えません… |
+| 0 で始まる10進数 | `08`, `019` | 0 で始まる10進数リテラル（08 など）は使えません… |
+| 接頭辞の後に数字がない・不正な数字 | `0x`, `0o9`, `0b12` | 不正な数値リテラルです |
+| 文字列の8進数エスケープ | `"\01"`, `"\7"` | 8進数エスケープシーケンス（\01 など）は使えません…（`\0` 単独は可） |
 
 ---
 
@@ -1234,13 +1244,13 @@ const e = event.end.column;        // 0-based 終端位置（exclusive）
 
 | テストファイル | 対象 | テスト数 |
 |-------------|------|---------|
-| `src/lexer/lexer.test.js` | Lexer | 45 |
+| `src/lexer/lexer.test.js` | Lexer | 50 |
 | `src/parser/parser.test.js` | Parser | 42 |
 | `src/interpreter/interpreter.test.js` | Interpreter・Recorder | 55 |
 | `src/interpreter/debugger.test.js` | JSDebugger | 52 |
 | `src/interpreter/virtual-dom.test.js` | VirtualDOM | 58 |
 
-**合計: 252テスト**
+**合計: 257テスト**
 
 ### 9.2 デバッガーテストの方針
 

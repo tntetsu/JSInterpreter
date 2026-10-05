@@ -180,9 +180,19 @@ TEMPLATE_NO_SUB("hello")
 | Hexadecimal | `0xFF` | `parseInt(raw, 16)` |
 | Octal | `0o17` | `parseInt(raw, 8)` |
 | Binary | `0b1010` | `parseInt(raw, 2)` |
-| Numeric separator | `1_000_000` | Strip `_`, then convert |
+| Numeric separator | `1_000_000`, `0x1f_ff` | Strip `_`, then convert (also for hex/octal/binary) |
+| Leading decimal point | `.5`, `.5e2` | A `.` followed by a digit is scanned by `scanNumber()` |
 
 `lexeme` stores `String(Number(raw))` — the string representation of the parsed number.
+
+**Forms rejected with a LexError** (following strict-mode rules; [ADR-012](adr/ADR-012-strict-mode-numeric-literals.md)):
+
+| Form | Example |
+|------|---------|
+| Legacy octal literal (leading zero) | `010` |
+| Decimal with leading zero | `08`, `019` |
+| Missing or invalid digits after prefix | `0x`, `0o9`, `0b12` |
+| Octal escape sequence in strings | `"\01"`, `"\7"` (a lone `\0` is allowed) |
 
 ---
 
@@ -1233,13 +1243,13 @@ Variable snapshots are obtained via `getMergedVars(event)` (same logic as `rende
 
 | Test file | Subject | Count |
 |-----------|---------|-------|
-| `src/lexer/lexer.test.js` | Lexer | 45 |
+| `src/lexer/lexer.test.js` | Lexer | 50 |
 | `src/parser/parser.test.js` | Parser | 42 |
 | `src/interpreter/interpreter.test.js` | Interpreter / Recorder | 55 |
 | `src/interpreter/debugger.test.js` | JSDebugger | 52 |
 | `src/interpreter/virtual-dom.test.js` | VirtualDOM | 58 |
 
-**Total: 252 tests**
+**Total: 257 tests**
 
 ### 9.2 Debugger Test Policy
 

@@ -246,7 +246,10 @@ class Lexer {
         break;
 
       case '.':
-        if (this.peek() === '.' && this.peekNext() === '.') {
+        if (this.isDigit(this.peek())) {
+          // 先頭が小数点の数値リテラル（.5）
+          this.scanNumber();
+        } else if (this.peek() === '.' && this.peekNext() === '.') {
           this.advance(); this.advance();
           this.addToken(TokenType.DOT_DOT_DOT);
         } else {
@@ -373,7 +376,11 @@ class Lexer {
       case "'":  return "'";
       case '"':  return '"';
       case '`':  return '`';
-      case '0':  return '\0';
+      case '0':
+        if (this.isDigit(this.peek())) throw this.octalEscapeError();
+        return '\0';
+      case '1': case '2': case '3': case '4': case '5': case '6': case '7': case '8': case '9':
+        throw this.octalEscapeError();
       case 'b':  return '\b';
       case 'f':  return '\f';
       case 'v':  return '\v';
@@ -381,6 +388,12 @@ class Lexer {
       case 'x':  return this.scanHexEscape(2);
       default:   return esc;
     }
+  }
+
+  /** 8進数エスケープ（\01・\7 など）は strict モードの規則に従い構文エラーとする（ADR-012） */
+  octalEscapeError() {
+    const column = this.current - this.lineStart - 1;  // バックスラッシュの位置
+    return new LexError('8進数エスケープシーケンス（\\01 など）は使えません。\\x01 や \\u0001 を使ってください', this.line, column);
   }
 
   scanUnicodeEscape() {
@@ -490,14 +503,25 @@ class Lexer {
     const s = this.source[this.start];
     const next = this.peek();
 
-    // 0x / 0o / 0b
-    if (s === '0') {
-      if (next === 'x' || next === 'X') { this.advance(); while (this.isHexDigit(this.peek())) this.advance(); }
-      else if (next === 'o' || next === 'O') { this.advance(); while (this.isOctalDigit(this.peek())) this.advance(); }
-      else if (next === 'b' || next === 'B') { this.advance(); while (this.peek() === '0' || this.peek() === '1') this.advance(); }
-      else this.scanDecimal();
+    // 0x / 0o / 0b（数値セパレーター _ を含められる）
+    if (s === '0' && /[xXoObB]/.test(next)) {
+      const isDigitOf = { x: c => this.isHexDigit(c), o: c => this.isOctalDigit(c), b: c => c === '0' || c === '1' }[next.toLowerCase()];
+      this.advance();
+      const digitsStart = this.current;
+      while (isDigitOf(this.peek()) || this.peek() === '_') this.advance();
+      if (this.current === digitsStart || this.isAlphaNumeric(this.peek())) {
+        throw new LexError('不正な数値リテラルです', this.line, this.column);
+      }
+    } else if (s === '0' && this.isDigit(next)) {
+      // 0 始まりの数値（010・08）は strict モードの規則に従い構文エラーとする。
+      // 非 strict モードでは 010 が8進数（=8）になる紛らわしい仕様のため（ADR-012）
+      throw new LexError(
+        /^0[0-7]+$/.test(this.source.slice(this.start).match(/^\d+/)[0])
+          ? '0 で始まる8進数リテラル（010 など）は使えません。8進数は 0o10 のように書いてください'
+          : '0 で始まる10進数リテラル（08 など）は使えません。先頭の 0 を取り除いてください',
+        this.line, this.column);
     } else {
-      this.scanDecimal();
+      this.scanDecimal(s === '.');
     }
 
     // 数値セパレーター除去してパース
@@ -505,9 +529,10 @@ class Lexer {
     this.addToken(TokenType.NUMBER, String(Number(raw)));
   }
 
-  scanDecimal() {
+  /** @param {boolean} afterDot  先頭の '.' を消費済み（.5 形式）なら true */
+  scanDecimal(afterDot = false) {
     while (this.isDigit(this.peek()) || this.peek() === '_') this.advance();
-    if (this.peek() === '.' && this.isDigit(this.peekNext())) {
+    if (!afterDot && this.peek() === '.' && this.isDigit(this.peekNext())) {
       this.advance(); // '.'
       while (this.isDigit(this.peek()) || this.peek() === '_') this.advance();
     }

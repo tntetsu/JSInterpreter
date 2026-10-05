@@ -36,3 +36,4 @@ ADR・CLAUDE.mdの記述と日付を突き合わせて再構成しました（AD
 | [009](ADR-009-signal-unwrap-and-destructuring.md) | ReturnSignal/ThrowSignalのunwrapと分割代入サポート | 2026-05-26 | 中（一部は時間差8分の強い相関、一部は低確度） |
 | [010](ADR-010-virtualdom-support.md) | VirtualDOMサポートの追加（WebJSVisualiser向け拡張） | 2026-06-12 | 中（姉妹プロジェクトADRとの相互参照あり） |
 | [011](ADR-011-callexpression-receiver-fix.md) | CallExpressionのレシーバー二重評価とゲスト関数のネイティブ呼び出し修正 | 2026-08-05 | 高（JSVisualizer CLAUDE.mdに同日・同内容の記述） |
+| [012](ADR-012-strict-mode-numeric-literals.md) | 0始まりの数値リテラルと8進数エスケープをstrictモードと同じく構文エラーにする | 2026-10-05 | 高（決定と同時に作成） |

@@ -278,7 +278,7 @@ npx jest src/interpreter/debugger.test.js
 npm run test:watch
 ```
 
-252 tests across 5 files.
+257 tests across 5 files.
 
 ## Known Limitations
 
@@ -310,6 +310,7 @@ npm run test:watch
 | `arguments` object | Not supported inside functions; use rest parameters (`...args`) instead |
 | `WeakRef` / `Proxy` / `Reflect` | Not registered as globals (can be added if needed) |
 | Module system | `import/export` is parse-only; no file loading or module resolution |
+| Strict mode | Not supported. `"use strict";` is ignored and there is no strict/sloppy distinction. However, numeric literals with a leading zero (`010`, `08`) and octal escape sequences (`"\01"`) are syntax errors as in strict mode, for educational reasons ([ADR-012](docs/adr/ADR-012-strict-mode-numeric-literals.md)) |
 
 ## Documentation
 
