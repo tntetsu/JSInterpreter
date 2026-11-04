@@ -61,6 +61,20 @@ function deepClone(val, seen = new WeakMap()) {
 }
 
 /**
+ * 内→外の順のスコープの列を、内側の同名の変数を優先して 1 つのオブジェクトにまとめる。
+ * @param {Environment[]} chain
+ * @param {WeakMap} seen  クローン済みの値の対応表
+ * @returns {Object}
+ */
+function snapshotChain(chain, seen) {
+  const frame = {};
+  for (let i = chain.length - 1; i >= 0; i--) {
+    for (const [k, v] of chain[i].bindings) frame[k] = deepClone(v, seen);
+  }
+  return frame;
+}
+
+/**
  * Environment — スコープチェーン
  *
  * 各 Environment インスタンスは 1 つのスコープを表し、
@@ -143,16 +157,44 @@ class Environment {
 
   /**
    * このスコープ自身のバインディングだけをディープクローンして返す（親チェーンをたどらない）。
-   * callFunction の frameEnvStack 用途に使用する。
+   * 呼び出した地点の環境がこのスコープの内側にないときの代わりに使う。
    * @returns {Object} { name: value } のプレーンオブジェクト
    */
-  snapshotOwn() {
+  snapshotOwn(seen = new WeakMap()) {
     const frame = {};
-    const seen = new WeakMap();
     for (const [k, v] of this.bindings) {
       frame[k] = deepClone(v, seen);
     }
     return frame;
+  }
+
+  /**
+   * inner からこのスコープまでの各スコープのバインディングを 1 つにまとめて返す（内側の同名の変数を優先）。
+   * 呼び出し元フレームの変数の記録に使う。関数の引数（このスコープ）に加えて、呼び出した地点から見える
+   * 関数本体やブロックの let/const も含める。inner がこのスコープの内側にないときは、このスコープだけを返す。
+   * @param {Environment} inner
+   * @param {WeakMap} [seen]  同じ値を同じクローンにするための対応表（複数のスナップショットで共有する）
+   * @returns {Object} { name: value } のプレーンオブジェクト
+   */
+  snapshotFrom(inner, seen = new WeakMap()) {
+    const chain = [];
+    for (let e = inner; e; e = e.parent) {
+      chain.push(e);
+      if (e === this) return snapshotChain(chain, seen);
+    }
+    return this.snapshotOwn(seen);
+  }
+
+  /**
+   * このスコープからグローバルスコープの手前までのバインディングを 1 つにまとめて返す（内側の同名の変数を優先）。
+   * グローバルのブロック（for の本体など）から関数を呼んだとき、そのブロックの変数の記録に使う。
+   * @param {WeakMap} [seen]  同じ値を同じクローンにするための対応表（複数のスナップショットで共有する）
+   * @returns {Object} { name: value } のプレーンオブジェクト
+   */
+  snapshotBlocks(seen = new WeakMap()) {
+    const chain = [];
+    for (let e = this; e && e.parent; e = e.parent) chain.push(e);
+    return snapshotChain(chain, seen);
   }
 
   /**
@@ -168,9 +210,8 @@ class Environment {
    *
    * @returns {Array<Object>} [localScope, ..., globalScope] の順の配列
    */
-  snapshot() {
+  snapshot(seen = new WeakMap()) {
     const frames = [];
-    const seen = new WeakMap();
     let cur = this;
     while (cur) {
       const frame = {};

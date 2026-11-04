@@ -649,3 +649,107 @@ describe('JSDebugger', () => {
     });
   });
 });
+
+// 呼び出し元のフレームは、呼び出した地点から見える変数（引数、関数本体やブロックの let/const）を記録する
+describe('frameEnvs / globalBlockVars', () => {
+  /** 名前が name の関数の実行中で、最初の return の enter イベントを返す */
+  function eventIn(code, name) {
+    const dbg = new JSDebugger(code);
+    return dbg.trace.find(e => e.phase === 'enter' && e.nodeType === 'ReturnStatement'
+      && e.callStack.at(-1)?.name === name);
+  }
+
+  test('呼び出し元のフレームに関数本体の let/const が現在の値で記録される', () => {
+    const ev = eventIn(`
+      function inner(x) { return x; }
+      function outer(a) {
+        let total = a;
+        const k = 2;
+        total = total + 1;
+        inner(total);
+      }
+      outer(3);`, 'inner');
+    expect(ev.frameEnvs[0]).toMatchObject({ a: 3, total: 4, k: 2 });
+    expect(ev.frameEnvs[1]).toMatchObject({ x: 4 });
+  });
+
+  test('呼び出し元のフレームにブロックと for の変数が記録される', () => {
+    const ev = eventIn(`
+      function inner(x) { return x; }
+      function outer() {
+        let s = 1;
+        for (let i = 5; i < 6; i++) {
+          let t = 2;
+          inner(i);
+        }
+      }
+      outer();`, 'inner');
+    expect(ev.frameEnvs[0]).toMatchObject({ s: 1, i: 5, t: 2 });
+  });
+
+  test('呼び出した地点より内側の同名の変数を優先し、呼び出し元の変数は別物のまま', () => {
+    const ev = eventIn(`
+      function inner(v) { let v2 = v; return v2; }
+      function outer(v) {
+        { let v = 'block'; inner(1); }
+      }
+      outer('param');`, 'inner');
+    expect(ev.frameEnvs[0].v).toBe('block');
+    expect(ev.frameEnvs[1].v).toBe(1);
+  });
+
+  test('宣言の途中で呼び出した let は未初期化のまま記録される', () => {
+    const ev = eventIn(`
+      function inner(x) { return x; }
+      function outer() { let r = inner(1); return r; }
+      outer();`, 'inner');
+    expect(ev.frameEnvs[0].r).toBe(TDZ_SENTINEL);
+  });
+
+  test('ネイティブから呼ばれたコールバックでも呼び出し元の変数が記録される', () => {
+    const ev = eventIn(`
+      function outer() {
+        let s = 1;
+        [7].forEach(function cb(v) { return v; });
+      }
+      outer();`, 'cb');
+    expect(ev.frameEnvs[0]).toMatchObject({ s: 1 });
+  });
+
+  test('コンストラクタを呼び出した関数の変数も記録される', () => {
+    const dbg = new JSDebugger(`
+      class P { constructor(v) { this.v = v; } }
+      function outer() { let s = 1; return new P(s); }
+      outer();`);
+    const ev = dbg.trace.find(e => e.callStack.at(-1)?.name === 'P');
+    expect(ev.frameEnvs[0]).toMatchObject({ s: 1 });
+  });
+
+  test('グローバルの for から関数を呼ぶと、ブロックの変数が globalBlockVars に記録される', () => {
+    const ev = eventIn(`
+      function f(v) { return v; }
+      let s = 1;
+      for (let i = 5; i < 6; i++) {
+        let t = 2;
+        f(i);
+      }`, 'f');
+    expect(ev.globalBlockVars).toMatchObject({ i: 5, t: 2 });
+    expect(ev.globalBlockVars).not.toHaveProperty('s');   // グローバルの変数は env 側にある
+  });
+
+  test('同じ配列を指す変数は、どのフレームでも同じクローンを指す', () => {
+    const ev = eventIn(`
+      function g(arr) { return arr; }
+      function f() { let a = [1]; let b = [1]; g(a); }
+      f();`, 'g');
+    expect(ev.frameEnvs[0].a).toBe(ev.frameEnvs[1].arr);
+    expect(ev.env[0].arr ?? ev.env[1].arr).toBe(ev.frameEnvs[0].a);
+    expect(ev.frameEnvs[0].b).not.toBe(ev.frameEnvs[0].a);
+  });
+
+  test('関数の外では globalBlockVars は空', () => {
+    const dbg = new JSDebugger('for (let i = 0; i < 1; i++) { let t = 2; }');
+    expect(dbg.trace.every(e => Object.keys(e.globalBlockVars).length === 0)).toBe(true);
+  });
+});
+

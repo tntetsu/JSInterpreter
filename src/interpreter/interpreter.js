@@ -43,6 +43,8 @@ class Recorder {
     this.callStack = [];      // Frame[]  { name, loc, args }
     this.consoleLogs = [];    // { atIndex: number, level: string, text: string }
     this.frameEnvStack = [];  // Environment[]  各アクティブフレームの callEnv（push 順 = 外→内）
+    this.callSiteEnvs = [];   // Environment[]  各フレームを呼び出した地点の環境（frameEnvStack と同じ順）
+    this.curEnv = null;       // Environment    いま評価しているノードの環境
     this.vdom = null;         // VirtualDocument | null（DOM モード時に JSDebugger がセット）
     this.maxSteps = maxSteps; // 0 = 無制限
   }
@@ -65,6 +67,47 @@ class Recorder {
     }
   }
 
+  /** 関数呼び出しのフレームを積む。呼び出した地点の環境（curEnv）もいっしょに覚える。 */
+  pushFrame(frame, callEnv) {
+    this.callStack.push(frame);
+    this.frameEnvStack.push(callEnv);
+    this.callSiteEnvs.push(this.curEnv);
+  }
+
+  popFrame() {
+    this.callStack.pop();
+    this.frameEnvStack.pop();
+    this.callSiteEnvs.pop();
+  }
+
+  /**
+   * 各アクティブフレームの変数を現時点でスナップショットする（外→内の順）。
+   * 呼び出し元のフレームは、次のフレームを呼び出した地点から見える変数（引数、関数本体やブロックの
+   * let/const）を含む。最も内側のフレームは、いま評価している環境 env から見える変数を含む。
+   */
+  snapshotFrames(env, seen) {
+    return this.frameEnvStack.map((callEnv, i) => callEnv.snapshotFrom(this.callSiteEnvs[i + 1] ?? env, seen));
+  }
+
+  /** 関数の呼び出し中に、グローバルのブロック（for の本体など）の変数をスナップショットする。 */
+  snapshotGlobalBlocks(seen) {
+    return this.callSiteEnvs[0]?.snapshotBlocks(seen) ?? {};
+  }
+
+  /**
+   * 1 つの TraceEvent に記録する変数のスナップショットをまとめて作る。
+   * クローンの対応表を共有するので、同じ配列やオブジェクトを指す変数は、どのフレームでも同じクローンを指す
+   * （呼び出し元と呼び出し先が同じ配列を共有していることが、スナップショットでもわかる）。
+   */
+  snapshotVars(env) {
+    const seen = new WeakMap();
+    return {
+      env:             env.snapshot(seen),
+      frameEnvs:       this.snapshotFrames(env, seen),
+      globalBlockVars: this.snapshotGlobalBlocks(seen),
+    };
+  }
+
   /**
    * enter/exit のペアを記録し、matchIdx で相互リンクする。
    * fn() の戻り値を返す。
@@ -73,8 +116,8 @@ class Recorder {
     if (this.maxSteps > 0 && this.trace.length >= this.maxSteps) {
       throw new RangeError(`[MaxSteps] 実行が最大ステップ数 ${this.maxSteps.toLocaleString()} を超えたため停止しました`);
     }
-    // 各アクティブフレームの callEnv を現時点でスナップショット（外→内の順）
-    const frameEnvs = this.frameEnvStack.map(e => e.snapshotOwn());
+    const prevEnv = this.curEnv;
+    this.curEnv = env;
 
     const enterIdx = this.trace.length;
     this.trace.push({
@@ -85,14 +128,14 @@ class Recorder {
       depth,
       callDepth,
       callStack: this.callStack.map(f => ({ ...f })),
-      env: env.snapshot(),
-      frameEnvs,
+      ...this.snapshotVars(env),
       domSnapshot: this.vdom ? this.vdom.snapshot() : null,
       value: undefined,
       matchIdx: -1,
     });
 
     const rawValue = fn();
+    this.curEnv = prevEnv;
 
     // ReturnSignal / ThrowSignal を unwrap: trace には実際の値を記録し、
     // シグナル本体はそのまま return して制御フロー伝播に使う
@@ -101,9 +144,7 @@ class Recorder {
       traceValue = rawValue.value;
     }
 
-    // exit 時点で再スナップショット（ローカル変数が更新されている可能性があるため）
-    const exitFrameEnvs = this.frameEnvStack.map(e => e.snapshotOwn());
-
+    // exit 時点で再スナップショットする（ローカル変数が更新されている可能性があるため）
     const exitIdx = this.trace.length;
     this.trace.push({
       phase: 'exit',
@@ -113,8 +154,7 @@ class Recorder {
       depth,
       callDepth,
       callStack: this.callStack.map(f => ({ ...f })),
-      env: env.snapshot(),
-      frameEnvs: exitFrameEnvs,
+      ...this.snapshotVars(env),
       domSnapshot: this.vdom ? this.vdom.snapshot() : null,
       value: traceValue,
       matchIdx: enterIdx,
@@ -1222,13 +1262,12 @@ function callFunction(callee, args, thisValue, recorder, depth, callDepth, loc) 
     // args に配列・オブジェクトが含まれる場合、関数内で書き換えられても
     // スナップショット時点の値を表示できるようにする
     if (recorder) {
-      recorder.callStack.push({
+      // このフレームの callEnv と呼び出した地点の環境も登録する（スコープ表示用）
+      recorder.pushFrame({
         name: callee.name || '<anonymous>',
         loc:  loc || { line: 0, column: 0 },
         args: args.map(a => deepClone(a)),
-      });
-      // このフレームの callEnv を frameEnvStack に登録（スコープ表示用）
-      recorder.frameEnvStack.push(callEnv);
+      }, callEnv);
     }
 
     // var 宣言を関数スコープに事前定義（巻き上げ）
@@ -1244,10 +1283,7 @@ function callFunction(callee, args, thisValue, recorder, depth, callDepth, loc) 
       result = evaluate(callee.body, callEnv, recorder, depth, bodyCallDepth);
     }
 
-    if (recorder) {
-      recorder.callStack.pop();
-      recorder.frameEnvStack.pop();
-    }
+    if (recorder) recorder.popFrame();
 
     // 式本体のアロー関数（expression: true）は評価値を直接返す
     if (callee.expression) {
@@ -1372,14 +1408,10 @@ function newInstance(cls, args, recorder, depth, callDepth, loc) {
 
     bindParams(cls.constructor.params, args, ctorEnv, recorder, depth, callDepth);
     if (recorder) {
-      recorder.callStack.push({ name: cls.name, loc: loc || { line: 0, column: 0 }, args: args.map(a => deepClone(a)) });
-      recorder.frameEnvStack.push(ctorEnv);
+      recorder.pushFrame({ name: cls.name, loc: loc || { line: 0, column: 0 }, args: args.map(a => deepClone(a)) }, ctorEnv);
     }
     const result = evaluate(cls.constructor.body, ctorEnv, recorder, depth, callDepth);
-    if (recorder) {
-      recorder.callStack.pop();
-      recorder.frameEnvStack.pop();
-    }
+    if (recorder) recorder.popFrame();
     if (result instanceof ThrowSignal) return result;
   } else if (cls.superClass && cls.superClass.__type__ === 'JSClass') {
     // 暗黙のコンストラクターで super を呼ぶ

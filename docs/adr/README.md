@@ -37,3 +37,4 @@ ADR・CLAUDE.mdの記述と日付を突き合わせて再構成しました（AD
 | [010](ADR-010-virtualdom-support.md) | VirtualDOMサポートの追加（WebJSVisualiser向け拡張） | 2026-06-12 | 中（姉妹プロジェクトADRとの相互参照あり） |
 | [011](ADR-011-callexpression-receiver-fix.md) | CallExpressionのレシーバー二重評価とゲスト関数のネイティブ呼び出し修正 | 2026-08-05 | 高（JSVisualizer CLAUDE.mdに同日・同内容の記述） |
 | [012](ADR-012-strict-mode-numeric-literals.md) | 0始まりの数値リテラルと8進数エスケープをstrictモードと同じく構文エラーにする | 2026-10-05 | 高（決定と同時に作成） |
+| [013](ADR-013-caller-frame-variables.md) | 呼び出し元のフレームに、呼び出した地点から見える変数を記録する | 2026-11-04 | 中（姉妹プロジェクトの表示に影響） |
