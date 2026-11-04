@@ -420,6 +420,7 @@ VariableDeclaration・ReturnStatement・ThrowStatement は値を表示しない�
 | ネイティブ async I/O | `fetch`・`setTimeout` 等は動作しない |
 | ネイティブメソッドへの JSFunction 渡し | `[1,2,3].map(x => x*2)` 等は動作しない |
 | `arguments` オブジェクト | 未対応（レスト引数 `...args` で代替） |
+| 再帰の深さ | ホストの JS エンジンのスタックの大きさで決まる。ゲストの呼び出しで約 150〜210 段（Node.js 22 で計測）を超えるとスタックオーバーフローで止まる（ADR-014） |
 | モジュール | `import/export` は構文解析のみ |
 
 ---

@@ -442,6 +442,7 @@ All errors are printed as human-readable messages **without** a stack trace.
 | Native async I/O | `fetch`, `setTimeout`, etc. do not work |
 | JSFunction as native callback | `[1,2,3].map(x => x*2)` does not work |
 | `arguments` object | Not supported; use rest parameters (`...args`) |
+| Recursion depth | Limited by the host JS engine's stack. Beyond about 150–210 nested guest calls (measured on Node.js 22), execution stops with a stack overflow (ADR-014) |
 | Module system | `import/export` is parse-only; no file loading |
 
 ---

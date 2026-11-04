@@ -308,6 +308,7 @@ npm run test:watch
 | ネイティブ async I/O | `async/await` は同期的にシミュレーションするため、`fetch`・`setTimeout` など本物の非同期 I/O は動作しない |
 | ネイティブメソッドへの JSFunction 渡し | `[1,2,3].map(x => x*2)` のような、ネイティブ配列/オブジェクトメソッドにインタープリター内関数を渡す呼び出しは動作しない（コールバックが JSFunction オブジェクトになるため） |
 | `arguments` オブジェクト | 関数内の `arguments` は未定義。レスト引数（`...args`）で代替 |
+| 再帰の深さ | ホストの JS エンジンのスタックの大きさで決まる。ゲストの呼び出しで約 150〜210 段（Node.js 22 で計測）を超えるとスタックオーバーフローで止まる（ADR-014） |
 | `WeakRef` / `Proxy` / `Reflect` | グローバルに未登録（必要に応じて追加可能） |
 | モジュール | `import/export` は構文解析のみ（ファイル読み込み・モジュール解決は行わない） |
 | strict モード | 非対応。`"use strict";` は無視され、strict モードと非 strict モードの区別をしない。ただし 0 で始まる数値リテラル（`010`・`08`）と 8 進数エスケープ（`"\01"`）は、非 strict モードでも strict モードと同じく構文エラーにする（教育目的。[ADR-012](docs/adr/ADR-012-strict-mode-numeric-literals.md)） |

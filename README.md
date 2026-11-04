@@ -308,6 +308,7 @@ npm run test:watch
 | Native async I/O | `async/await` is simulated synchronously; `fetch`, `setTimeout`, etc. do not work |
 | JSFunction as native callback | `[1,2,3].map(x => x*2)` does not work — native methods receive a JSFunction object, not a callable |
 | `arguments` object | Not supported inside functions; use rest parameters (`...args`) instead |
+| Recursion depth | Limited by the host JS engine's stack. Beyond about 150–210 nested guest calls (measured on Node.js 22), execution stops with a stack overflow (ADR-014) |
 | `WeakRef` / `Proxy` / `Reflect` | Not registered as globals (can be added if needed) |
 | Module system | `import/export` is parse-only; no file loading or module resolution |
 | Strict mode | Not supported. `"use strict";` is ignored and there is no strict/sloppy distinction. However, numeric literals with a leading zero (`010`, `08`) and octal escape sequences (`"\01"`) are syntax errors as in strict mode, for educational reasons ([ADR-012](docs/adr/ADR-012-strict-mode-numeric-literals.md)) |
