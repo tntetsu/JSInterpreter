@@ -56,11 +56,14 @@ function fireEventDef(def, vdom) {
  *
  * maxSteps 超過エラー（[MaxSteps] プレフィックス）はここで自動的にプレフィックスを除去し、
  * ゼロ除算・スタックオーバーフロー等の組み込みエラーと同等の実行エラーとして扱う。
+ * スタックオーバーフローのメッセージはホストの JS エンジンごとに違うので、ここでそろえる。
  */
 class ExecutionError extends Error {
   constructor(cause, source, trace, ast, consoleLogs) {
     const rawMsg = cause?.message ?? String(cause);
-    super(rawMsg.replace(/^\[MaxSteps\]\s*/, ''));
+    super(cause instanceof RangeError && /call stack|too much recursion/i.test(rawMsg)
+      ? '関数の呼び出しが深くなりすぎたため停止しました（再帰が止まっていない可能性があります）'
+      : rawMsg.replace(/^\[MaxSteps\]\s*/, ''));
     this.name             = 'ExecutionError';
     this.cause            = cause;
     this.partialSource    = source;
