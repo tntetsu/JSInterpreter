@@ -142,7 +142,7 @@ async/await is simulated synchronously. Code that does not involve native I/O is
 | `Promise.all/allSettled/race/any([...])` | Synchronously resolved results |
 | `new Promise((resolve, reject) => { ... })` | Runs executor synchronously, returns `JSPromise` |
 
-**Limitation**: Does not work with real async I/O such as `fetch` or `setTimeout`.
+**Limitation**: Does not work with real async I/O such as `fetch` or `setTimeout`. `JSPromise` has no `.then`, `.catch`, or `.finally`. Because `await` does not return control to the caller, output can appear in a different order from real JavaScript.
 
 ### 3.8 Other
 
@@ -440,6 +440,8 @@ All errors are printed as human-readable messages **without** a stack trace.
 | Limitation | Detail |
 |-----------|--------|
 | Native async I/O | `fetch`, `setTimeout`, etc. do not work |
+| Promise methods | `.then`, `.catch`, and `.finally` are not implemented (they are `undefined`, and calling one raises a "not callable" error). Use `await` to get the value |
+| Order of `async` execution | `await` does not return control to the caller; the function runs to completion on the spot. In `main(); console.log("x");`, output from inside `main` comes first (a different order from real JavaScript) |
 | JSFunction as native callback | `[1,2,3].map(x => x*2)` does not work |
 | `arguments` object | Not supported; use rest parameters (`...args`) |
 | Recursion depth | Limited by the host JS engine's stack. Beyond about 150–210 nested guest calls (measured on Node.js 22), execution stops with a stack overflow (ADR-014) |

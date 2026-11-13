@@ -144,7 +144,7 @@ async/await を同期的にシミュレーションする。ネイティブ I/O 
 | `Promise.all/allSettled/race/any([...])` | 同期的に解決した結果を返す |
 | `new Promise((resolve, reject) => { ... })` | executor を同期実行して `JSPromise` を返す |
 
-**制約**: `fetch`・`setTimeout` などの本物の非同期 I/O を含む場合は動作しない。
+**制約**: `fetch`・`setTimeout` などの本物の非同期 I/O を含む場合は動作しない。`JSPromise` には `.then`・`.catch`・`.finally` がない。`await` で呼び出し元に戻らないため、本物の JavaScript と出力の順番が変わることがある。
 
 ### 3.8 その他
 
@@ -418,6 +418,8 @@ VariableDeclaration・ReturnStatement・ThrowStatement は値を表示しない�
 | 制限 | 内容 |
 |------|------|
 | ネイティブ async I/O | `fetch`・`setTimeout` 等は動作しない |
+| Promise のメソッド | `.then`・`.catch`・`.finally` は未実装（`undefined` になり、呼び出すと「呼び出し不能な値」エラー）。値は `await` で取り出す |
+| `async` 関数の実行順 | `await` で呼び出し元に戻らず、その場で最後まで実行する。`main(); console.log("x");` では `main` の中の出力が先に出る（本物の JavaScript とは順番が変わる） |
 | ネイティブメソッドへの JSFunction 渡し | `[1,2,3].map(x => x*2)` 等は動作しない |
 | `arguments` オブジェクト | 未対応（レスト引数 `...args` で代替） |
 | 再帰の深さ | ホストの JS エンジンのスタックの大きさで決まる。ゲストの呼び出しで約 150〜210 段（Node.js 22 で計測）を超えるとスタックオーバーフローで止まる（ADR-014） |

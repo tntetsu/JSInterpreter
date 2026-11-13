@@ -306,6 +306,7 @@ npm run test:watch
 | Limitation | Detail |
 |-----------|--------|
 | Native async I/O | `async/await` is simulated synchronously; `fetch`, `setTimeout`, etc. do not work |
+| Promise methods | `.then`, `.catch`, and `.finally` are not implemented; use `await` to get the value. Because `await` does not return control to the caller, output can appear in a different order from real JavaScript |
 | JSFunction as native callback | `[1,2,3].map(x => x*2)` does not work — native methods receive a JSFunction object, not a callable |
 | `arguments` object | Not supported inside functions; use rest parameters (`...args`) instead |
 | Recursion depth | Limited by the host JS engine's stack. Beyond about 150–210 nested guest calls (measured on Node.js 22), execution stops with a stack overflow (ADR-014) |
