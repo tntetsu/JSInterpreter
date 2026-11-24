@@ -56,7 +56,9 @@ class Recorder {
    * @param {any[]} args
    */
   captureLog(level, args) {
-    const text = args.map(formatLogArg).join(' ');
+    // formatLogArg を map に直接渡すと、配列の添字が depth として渡り、2 番目以降の文字列に
+    // 引用符が付いてしまう（ADR-016）。最上位の引数は常に depth 0 で整形する
+    const text = args.map(a => formatLogArg(a)).join(' ');
     // 記録：次に push される TraceEvent のインデックスを atIndex とする
     this.consoleLogs.push({ atIndex: this.trace.length, level, text });
     // CLI モードでもターミナルに出力する

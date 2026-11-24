@@ -718,6 +718,8 @@ The format follows Node.js conventions:
 | `JSPromise` (fulfilled) | `Promise { value }` | `Promise { value }` |
 | `JSPromise` (rejected) | `Promise { <rejected> reason }` | `Promise { <rejected> reason }` |
 
+Every top-level argument, whatever its position, is formatted with `depth === 0` (`args.map(a => formatLogArg(a))`; passing the function to `map` directly would pass the index as depth. See [ADR-016](adr/ADR-016-console-log-top-level-strings.md)).
+
 Keys starting with `__` are excluded from object output (internal markers).
 
 ```js
@@ -1246,10 +1248,10 @@ Variable snapshots are obtained via `getMergedVars(event)` (same logic as `rende
 | `src/lexer/lexer.test.js` | Lexer | 50 |
 | `src/parser/parser.test.js` | Parser | 42 |
 | `src/interpreter/interpreter.test.js` | Interpreter / Recorder | 55 |
-| `src/interpreter/debugger.test.js` | JSDebugger | 52 |
+| `src/interpreter/debugger.test.js` | JSDebugger | 64 |
 | `src/interpreter/virtual-dom.test.js` | VirtualDOM | 58 |
 
-**Total: 257 tests**
+**Total: 269 tests**
 
 ### 9.2 Debugger Test Policy
 
