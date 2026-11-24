@@ -42,8 +42,8 @@ function formatLogArg(v, depth = 0) {
  */
 class Recorder extends CoreRecorder {
   constructor(maxSteps = 0) {
-    // 既存の挙動を保つため、引数の位置（index）を formatLogArg の depth としてそのまま渡す。
-    // そのため console.log(1, "a") は「1 'a'」になる（2 番目以降の文字列に引用符が付く）。
+    // master の今の挙動を保つため、引数の位置（index）を formatLogArg の depth としてそのまま渡す。
+    // そのため console.log(1, "a") は「1 'a'」になる（不具合。修正は ADR-016、ブランチ fix/console-log-args）。
     super(maxSteps, { formatLog: formatLogArg, echo: true });
     this.vdom = null;         // VirtualDocument | null（DOM モード時に JSDebugger がセット）
   }

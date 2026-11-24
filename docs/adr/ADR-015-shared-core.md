@@ -45,5 +45,5 @@ JS の部品はコアの派生クラスにする。外から見える名前・im
 ## 結果
 
 - 他の言語の評価器は `js-interpreter/core` だけを使えばよい。PyVisualizer の Python エンジンは、Phase 0 の回避策をすべて外してコアの API に乗せ換えた
-- 既存の挙動を保つため、`console.log` の 2 番目以降の文字列の引数に引用符が付く挙動（`console.log(1, "a")` が `1 'a'` になる。`args.map(formatLogArg)` で配列の添字が depth として渡っていたため。Node.js では `1 a`）もそのまま残した。直すかどうかは別に判断する
+- 既存の挙動を保つため、`console.log` の 2 番目以降の文字列の引数に引用符が付く挙動（`console.log(1, "a")` が `1 'a'` になる。`args.map(formatLogArg)` で配列の添字が depth として渡っていたため。Node.js では `1 a`）もそのまま残した。この挙動は不具合で、修正は ADR-016（ブランチ `fix/console-log-args`）で提案している。修正を master にマージしたら、このブランチを追従させ、JS の Recorder を `formatLog: (v) => formatLogArg(v)` に直す
 - コアの `Recorder` は、既定では端末に出力しない（JS の `Recorder` は従来どおり出力する）
