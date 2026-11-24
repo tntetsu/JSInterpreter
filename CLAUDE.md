@@ -49,6 +49,7 @@ npm run dev:web
 ```
 src/
   errors.js   → 共通エラークラス（循環依存回避のため独立）
+  core/       → 言語非依存の共通コア（Recorder・TraceDebugger・Scope・deepClone・シグナル）。js-interpreter/core として公開
   lexer/      → レキサー（ソース文字列 → トークンストリーム）
   parser/     → パーサー（トークンストリーム → AST）
   interpreter/→ 評価器（AST → ランタイム値）、デバッガー、環境
@@ -57,6 +58,12 @@ web/
   app.js              → CodeTrace UI（ブラウザ向けステップ実行 UI）
   interpreter.bundle.js → esbuild でバンドルした debugger.js（git 管理外）
 ```
+
+### 共通コア（`src/core/`）
+
+他の言語（PyVisualizer の Python など）の評価器と共有する、言語に依存しない部品。`package.json` の `exports` で `js-interpreter/core` として公開している。JS の `Recorder`（interpreter.js）・`Environment`（environment.js）・`JSDebugger`（debugger.js）はこれらの派生クラスで、外から見える名前・import 先・挙動は従来と同じ（ADR-015）。humanStep の停止点は nodeType 名ではなく `static nodeCategories`（役割ごとの nodeType の一覧）で決まり、JS の一覧は `JS_NODE_CATEGORIES`（debugger.js）。
+
+コアを変更したら、JS の挙動が変わっていないことを PyVisualizer の `scripts/compare-js-core.mjs`（master と作業ブランチのトレースを 1 件ずつ比べる）でも確かめる。
 
 ### エラークラス（`src/errors.js`）
 
@@ -129,7 +136,7 @@ AST を再帰的にウォークします。主要な概念：
 npm test
 ```
 
-全 252 テストがパスすることを確認してからコミットする。テストが失敗した場合はコミットしない。
+全 284 テストがパスすることを確認してからコミットする。テストが失敗した場合はコミットしない。
 
 ### 2. ドキュメントの更新
 

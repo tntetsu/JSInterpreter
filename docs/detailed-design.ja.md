@@ -47,6 +47,14 @@
 ```
 src/
 ├── errors.js             LexError, ParseError, RuntimeError  （共通 — 循環依存を解消）
+├── core/                 言語非依存の共通コア（js-interpreter/core として公開。§12）
+│   ├── index.js          公開する名前をまとめて export
+│   ├── signals.js        ReturnSignal, BreakSignal, ContinueSignal, ThrowSignal
+│   ├── clone.js          deepClone, createCloner（言語ごとのクローン方法を hook で足せる）
+│   ├── scope.js          Scope（bindings・parent・kind・スナップショット）
+│   ├── recorder.js       Recorder, joinConsoleLines
+│   ├── trace-debugger.js TraceDebugger, ExecutionError, finalizePartialTrace
+│   └── core.test.js
 ├── lexer/
 │   ├── lexer.js          Lexer, Token, TokenType
 │   └── lexer.test.js
@@ -54,10 +62,10 @@ src/
 │   ├── parser.js         Parser, parse()
 │   └── parser.test.js
 ├── interpreter/
-│   ├── environment.js    Environment, deepClone, TDZ_SENTINEL
-│   ├── interpreter.js    evaluate(), run(), record(), Recorder
+│   ├── environment.js    Environment（Scope の派生）, deepClone（再 export）, TDZ_SENTINEL
+│   ├── interpreter.js    evaluate(), run(), record(), Recorder（コアの Recorder の派生）
 │   ├── interpreter.test.js
-│   ├── debugger.js       JSDebugger
+│   ├── debugger.js       JSDebugger（TraceDebugger の派生）, ExecutionError（再 export）
 │   └── debugger.test.js
 ├── index.js              エントリポイント（CLI）
 web/
@@ -1247,10 +1255,11 @@ const e = event.end.column;        // 0-based 終端位置（exclusive）
 | `src/lexer/lexer.test.js` | Lexer | 50 |
 | `src/parser/parser.test.js` | Parser | 42 |
 | `src/interpreter/interpreter.test.js` | Interpreter・Recorder | 55 |
-| `src/interpreter/debugger.test.js` | JSDebugger | 52 |
+| `src/interpreter/debugger.test.js` | JSDebugger | 61 |
 | `src/interpreter/virtual-dom.test.js` | VirtualDOM | 58 |
+| `src/core/core.test.js` | 共通コア（別の言語の評価器から使う場合） | 18 |
 
-**合計: 257テスト**
+**合計: 284テスト**
 
 ### 9.2 デバッガーテストの方針
 
@@ -1284,3 +1293,46 @@ const e = event.end.column;        // 0-based 終端位置（exclusive）
 | 条件付きブレークポイント | `continue()` の引数に `condition: string` を追加し、評価して判定 |
 | ウォッチ式 | `JSDebugger` に `watch(expr: string)` を追加し、各ステップで評価した値を追記 |
 | ジェネレーター | `function*` / `yield` の実行サポートを interpreter に追加 |
+
+---
+
+## 12. 共通コア（src/core/）
+
+他の言語（PyVisualizer の Python など）の評価器と共有する、言語に依存しない部品。`js-interpreter/core` として公開する（`package.json` の `exports`）。JS の部品はこれらの派生クラスで、外から見える名前・挙動は従来と同じ。経緯は [ADR-015](adr/ADR-015-shared-core.md)。
+
+### 12.1 部品と、JS の派生クラス
+
+| コア | 役割 | JS の派生（追加するもの） |
+|---|---|---|
+| `Recorder(maxSteps, { clone, formatLog, echo })` | enter/exit の記録、変数のスナップショット、コールスタック、出力の記録 | `Recorder`（interpreter.js）：`formatLogArg` での整形、端末への出力、`eventExtras()` で `domSnapshot` |
+| `Scope(parent, kind)` | `bindings`・`parent`・`kind`、`define`、スナップショット（`snapshot`・`snapshotOwn`・`snapshotFrom`・`snapshotBlocks`。いずれも `clone` を受け取る） | `Environment`（environment.js）：`immutables`・`markConst`・`getFunctionScope`、TDZ と未定義変数のエラーを出す `get`/`set` |
+| `TraceDebugger({ source, trace, ast, consoleLogs, maxSteps })` | 状態参照・ステップ操作・humanStep・`static fromTrace()` | `JSDebugger`（debugger.js）：JS の実行（DOM モードを含む）、`static nodeCategories = JS_NODE_CATEGORIES`、`getEventSequenceSkeleton()` |
+| `deepClone(val, seen, hook)` / `createCloner(hook)` | スナップショット用のクローン（§4.3 の規則） | — |
+| `ExecutionError`・`finalizePartialTrace(trace)` | 実行時エラーの部分トレース | `JSDebugger` のコンストラクターが使う |
+
+`TraceDebugger.fromTrace()` は呼び出したクラスのインスタンスを返す（`JSDebugger.fromTrace()` は `JSDebugger`）。
+
+### 12.2 humanStep のノード分類（nodeCategories）
+
+§7.5 の停止点の規則①〜⑥b は、nodeType 名の代わりに役割ごとの一覧で書かれている。
+
+| 役割 | 使う規則 | JS（`JS_NODE_CATEGORIES`） |
+|---|---|---|
+| `stopOnExit` | ① exit で必ず止まる | VariableDeclaration, AssignmentExpression, UpdateExpression, ReturnStatement, ThrowStatement |
+| `call` | ② ユーザー定義関数の呼び出し（3 点） | CallExpression |
+| `block` | ② 関数本体の最初の文、④⑤ 本体を除く | BlockStatement |
+| `branch` | ③ 条件式の exit | IfStatement, ConditionalExpression |
+| `condLoop` | ④ 毎回の条件式の exit | WhileStatement, DoWhileStatement |
+| `forLoop` / `forInit` | ⑤ 条件式・更新式の exit（初期化部を除く） | ForStatement / VariableDeclaration |
+| `exprStmt` | ⑥ 中に停止点のない式文の exit、⑥b 失敗した式文の enter | ExpressionStatement |
+
+他の言語は派生クラスの `static nodeCategories` で自分の nodeType を与える。評価器が記録する独自のノード（例：Python の `for` の各回のループ変数への代入を `LoopBinding` として `record()` する）を `stopOnExit` に入れれば、そこでも止まる。
+
+### 12.3 出力の断片（write）
+
+`captureLog(level, args)` は従来どおり 1 行 1 件（`{ atIndex, level, text }`）。`write(text, level)` は改行を含みうる出力の断片を、改行ごとに区切って `{ atIndex, level, text, eol }` として記録する（行の途中で終わる断片は `eol: false`）。`joinConsoleLines(logs)` は両方が混ざった配列を 1 行 1 件にまとめる（各行の `atIndex` は行が完成した位置）。
+
+### 12.4 クローンの hook
+
+`deepClone(val, seen, hook)` は、`hook(val, clone, seen)` が `undefined` 以外を返せばそれを使う。言語ごとの可変な値（例：列挙されない印を持つ配列）の印を保つのに使う。hook は子要素をクローンする前に `seen.set(val, 新しいクローン)` を行う（循環参照のため）。`Recorder` の `clone` オプションに `createCloner(hook)` を渡すと、すべてのスナップショットで使われる。
+

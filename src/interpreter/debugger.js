@@ -1,5 +1,6 @@
 import { parse }       from '../parser/parser.js';
 import { evaluate, createGlobalEnv, Recorder, callFunction } from './interpreter.js';
+import { TraceDebugger, ExecutionError, finalizePartialTrace } from '../core/trace-debugger.js';
 import { createVirtualDocument, makeVEvent, generateEventSequenceSkeleton } from './virtual-dom.js';
 
 // ── イベントシーケンス処理 ───────────────────────────────────────────────────
@@ -49,29 +50,22 @@ function fireEventDef(def, vdom) {
   target.dispatchEvent(ev);
 }
 
+// ExecutionError は共通コア（src/core/trace-debugger.js）に移した。既存の import 先を保つため再 export する。
+
 /**
- * evaluate() 中に実行時エラー（maxSteps 超過を含む）が発生したときに
- * JSDebugger コンストラクタが throw する例外。
- * エラー発生直前までの部分トレースを保持するため、呼び出し側がエラー前の実行状態を表示できる。
- *
- * maxSteps 超過エラー（[MaxSteps] プレフィックス）はここで自動的にプレフィックスを除去し、
- * ゼロ除算・スタックオーバーフロー等の組み込みエラーと同等の実行エラーとして扱う。
- * スタックオーバーフローのメッセージはホストの JS エンジンごとに違うので、ここでそろえる。
+ * JS のノード型の役割（humanStep の停止点の計算に使う。TraceDebugger._getHumanIndices 参照）
+ * @type {import('../core/trace-debugger.js').NodeCategories}
  */
-class ExecutionError extends Error {
-  constructor(cause, source, trace, ast, consoleLogs) {
-    const rawMsg = cause?.message ?? String(cause);
-    super(cause instanceof RangeError && /call stack|too much recursion/i.test(rawMsg)
-      ? '関数の呼び出しが深くなりすぎたため停止しました（再帰が止まっていない可能性があります）'
-      : rawMsg.replace(/^\[MaxSteps\]\s*/, ''));
-    this.name             = 'ExecutionError';
-    this.cause            = cause;
-    this.partialSource    = source;
-    this.partialTrace     = trace;
-    this.partialAst       = ast;
-    this.partialConsoleLogs = consoleLogs;
-  }
-}
+const JS_NODE_CATEGORIES = Object.freeze({
+  stopOnExit: ['VariableDeclaration', 'AssignmentExpression', 'UpdateExpression', 'ReturnStatement', 'ThrowStatement'],
+  call:       ['CallExpression'],
+  block:      ['BlockStatement'],
+  branch:     ['IfStatement', 'ConditionalExpression'],
+  condLoop:   ['WhileStatement', 'DoWhileStatement'],
+  forLoop:    ['ForStatement'],
+  forInit:    ['VariableDeclaration'],
+  exprStmt:   ['ExpressionStatement'],
+});
 
 /**
  * JSDebugger — ステップ実行 API
@@ -101,7 +95,9 @@ class ExecutionError extends Error {
  *               callDepth が 0 のときはプログラム末尾へ
  *   stepBack  : cursor--（常に O(1)）
  */
-class JSDebugger {
+class JSDebugger extends TraceDebugger {
+  static nodeCategories = JS_NODE_CATEGORIES;
+
   /**
    * @param {string} source  実行するソースコード
    * @param {Object} [options]
@@ -109,12 +105,11 @@ class JSDebugger {
    * @param {boolean} [options.dom=false]        DOM モード（VirtualDOM を有効化）
    */
   constructor(source, options = {}) {
-    this.source   = source;
-    this.maxSteps = options.maxSteps ?? 100_000;
+    const maxSteps = options.maxSteps ?? 100_000;
 
     // ── フェーズ1：記録 ────────────────────────────────────────────────────
     const ast      = parse(source);
-    const recorder = new Recorder(this.maxSteps);
+    const recorder = new Recorder(maxSteps);
     const env      = createGlobalEnv(recorder);   // console を横取り
 
     if (options.dom) {
@@ -193,16 +188,8 @@ class JSDebugger {
     try {
       evaluate(ast, env, recorder, 0, 0);
     } catch (err) {
-      // 末尾の未完了 enter（matchIdx === -1）を除去してトレースを整理する
-      const tr = recorder.trace;
-      let tail = tr.length - 1;
-      while (tail >= 0 && tr[tail].matchIdx === -1) tail--;
-      tr.length = tail + 1;
-      // 外側コンテナ（Program 等）の matchIdx も trace.length に揃える
-      for (const ev of tr) {
-        if (ev.matchIdx === -1) ev.matchIdx = tr.length;
-      }
-
+      // 末尾の未完了 enter を除去し、外側コンテナ（Program 等）の matchIdx を trace.length に揃える
+      const tr = finalizePartialTrace(recorder.trace);
       throw new ExecutionError(err, source, tr, ast, recorder.consoleLogs);
     }
 
@@ -214,65 +201,13 @@ class JSDebugger {
       }
     }
 
-    this.ast         = ast;                   // 解析済み AST（制御フロービュー用）
-    this.trace       = recorder.trace;        // TraceEvent[]
-    this.consoleLogs = recorder.consoleLogs;  // ConsoleLog[]
-    this.cursor = 0;                          // 現在位置（0 始まり）
+    super({ source, trace: recorder.trace, ast, consoleLogs: recorder.consoleLogs, maxSteps });
     this._vdom = options.dom ? recorder.vdom : null;
   }
 
-  // ─── 状態参照 ────────────────────────────────────────────────────────────────
-
-  /** 実行が完了しているか */
-  isDone() {
-    return this.cursor >= this.trace.length;
-  }
-
-  /** 現在の TraceEvent を返す（done の場合は null） */
-  getCurrentEvent() {
-    return this.isDone() ? null : this.trace[this.cursor];
-  }
-
-  /** 現在のコールスタック */
-  getCallStack() {
-    const ev = this.getCurrentEvent();
-    return ev ? ev.callStack.slice() : [];
-  }
-
-  /**
-   * 現在のスコープ変数を返す。
-   * @param {'local'|'all'} [scope='local']
-   *   'local' → 最内スコープのみ
-   *   'all'   → スコープチェーン全体（フラット化、上書きなし）
-   */
-  getVariables(scope = 'local') {
-    const ev = this.getCurrentEvent();
-    if (!ev) return {};
-    if (scope === 'local') {
-      return { ...(ev.env[0] || {}) };
-    }
-    const result = {};
-    for (let i = ev.env.length - 1; i >= 0; i--) {
-      Object.assign(result, ev.env[i]);
-    }
-    return result;
-  }
-
-  /**
-   * 現在の cursor までに出力されたコンソールログを返す。
-   * atIndex <= cursor のエントリのみを返すことで、ステップに応じて
-   * 出力が積み上がる様子を再現できる。
-   * @returns {{ atIndex: number, level: string, text: string }[]}
-   */
-  getConsoleOutput() {
-    return this.consoleLogs.filter(log => log.atIndex <= this.cursor);
-  }
-
-  /** 最後の exit イベントの value（プログラム完了後） */
-  getResult() {
-    if (this.trace.length === 0) return undefined;
-    const last = this.trace[this.trace.length - 1];
-    return last.phase === 'exit' ? last.value : undefined;
+  _init(init) {
+    super._init(init);
+    this._vdom = null;
   }
 
   /**
@@ -283,362 +218,6 @@ class JSDebugger {
   getEventSequenceSkeleton() {
     if (!this._vdom) return [];
     return generateEventSequenceSkeleton(this._vdom);
-  }
-
-  // ─── ステップ操作 ────────────────────────────────────────────────────────────
-
-  /**
-   * stepIn — 次のイベントへ（深さ問わず）
-   * @returns {StepResult}
-   */
-  stepIn() {
-    if (!this.isDone()) this.cursor++;
-    return this._result();
-  }
-
-  /**
-   * stepOver — 現在ノードの評価をまとめてスキップ
-   * - 現在が enter(N) → N に対応する exit(N) へジャンプ
-   * - 現在が exit    → cursor++（stepIn と同じ）
-   * @returns {StepResult}
-   */
-  stepOver() {
-    if (this.isDone()) return this._result();
-
-    const ev = this.getCurrentEvent();
-    if (ev.phase === 'enter') {
-      // matchIdx が exit イベントを指している
-      this.cursor = ev.matchIdx;
-    } else {
-      this.cursor++;
-    }
-    return this._result();
-  }
-
-  /**
-   * stepOut — 現在の関数呼び出しを抜ける
-   * - callDepth < currentCallDepth になる最初の exit へジャンプ
-   * - callDepth === 0（トップレベル）の場合は末尾へ
-   * @returns {StepResult}
-   */
-  stepOut() {
-    if (this.isDone()) return this._result();
-
-    const currentCallDepth = this.getCurrentEvent().callDepth;
-
-    if (currentCallDepth === 0) {
-      // トップレベル：末尾へ
-      this.cursor = this.trace.length;
-      return this._result();
-    }
-
-    // callDepth が減る exit イベントを探す
-    for (let i = this.cursor + 1; i < this.trace.length; i++) {
-      const ev = this.trace[i];
-      if (ev.phase === 'exit' && ev.callDepth < currentCallDepth) {
-        this.cursor = i;
-        return this._result();
-      }
-    }
-
-    // 見つからなければ末尾へ
-    this.cursor = this.trace.length;
-    return this._result();
-  }
-
-  /**
-   * stepBack — 1ステップ前に戻る（常に O(1)）
-   * cursor === 0 の場合は no-op。
-   * @returns {StepResult}
-   */
-  stepBack() {
-    if (this.cursor > 0) this.cursor--;
-    return this._result();
-  }
-
-  /**
-   * continue — ブレークポイントまたは末尾まで実行
-   * @param {Array<{line:number, column?:number}>} [breakpoints=[]]
-   * @returns {StepResult}
-   */
-  continue(breakpoints = []) {
-    if (this.isDone()) return this._result();
-
-    const start = this.cursor + 1;
-    for (let i = start; i < this.trace.length; i++) {
-      const ev = this.trace[i];
-      if (ev.phase === 'enter' && breakpoints.some(bp => bp.line === ev.loc.line && (bp.column === undefined || bp.column === ev.loc.column))) {
-        this.cursor = i;
-        return this._result();
-      }
-    }
-
-    this.cursor = this.trace.length;
-    return this._result();
-  }
-
-  // ─── ヒューマンステップ ──────────────────────────────────────────────────────
-
-  /**
-   * 「意味のある変化点」インデックスの集合を遅延計算する。
-   *
-   * 対象イベント:
-   *   - exit: VariableDeclaration / AssignmentExpression / UpdateExpression
-   *   - exit: ReturnStatement / ThrowStatement
-   *   - enter: CallExpression（ユーザー定義関数のみ）           ← 呼び出し直前
-   *   - enter: 関数本体の最初のステートメント                   ← 関数に入った直後
-   *   - exit:  CallExpression（ユーザー定義関数のみ）           ← 関数が返った直後
-   *   - exit: IfStatement / ConditionalExpression の条件式（true/false 確定時）
-   *   - exit: WhileStatement / DoWhileStatement の条件式（ループごと）
-   *   - exit: ForStatement のテスト式（init/body 以外の depth+1 exit）
-   *
-   * @returns {Set<number>}
-   */
-  _getHumanIndices() {
-    if (this._humanIndices) return this._humanIndices;
-
-    const set   = new Set();
-    const trace = this.trace;
-
-    // 無条件に対象となる exit ノード型
-    const ALWAYS_EXIT = new Set([
-      'VariableDeclaration',
-      'AssignmentExpression',
-      'UpdateExpression',
-      'ReturnStatement',
-      'ThrowStatement',
-    ]);
-
-    // CallExpression ごとの追跡スタック
-    // {
-    //   baseCallDepth: number,   // CallExpression 時点の callDepth
-    //   enterIdx:      number,   // enter CallExpression のトレースインデックス
-    //   state:         0|1|2,    // 0=未入場 1=入場済み(最初stmt待ち) 2=最初stmt追加済み
-    //   innerDepth:    number,   // BlockStatement.depth+1（−1 は未確定）
-    // }
-    const callStack = [];
-
-    for (let i = 0; i < trace.length; i++) {
-      const ev = trace[i];
-
-      // ① 無条件に対象の exit
-      if (ev.phase === 'exit' && ALWAYS_EXIT.has(ev.nodeType)) {
-        set.add(i);
-      }
-
-      // ② CallExpression：ユーザー定義関数呼び出しのみ（callDepth 増加で判定）
-      //
-      //   humanStep で止まる3点：
-      //     (A) enter CallExpression  — 関数を呼ぼうとしている瞬間
-      //     (B) 関数本体の最初のステートメント enter — 関数に入った直後
-      //     (C) exit  CallExpression  — 関数が返った瞬間（戻り値確定）
-      if (ev.phase === 'enter' && ev.nodeType === 'CallExpression') {
-        callStack.push({
-          baseCallDepth: ev.callDepth,
-          enterIdx:      i,
-          state:         0,
-          innerDepth:    -1,
-        });
-      }
-
-      if (callStack.length > 0) {
-        const top = callStack[callStack.length - 1];
-
-        if (ev.callDepth > top.baseCallDepth) {
-          // 関数本体に入った
-          if (top.state === 0) {
-            top.state = 1;
-            set.add(top.enterIdx);   // (A) enter CallExpression を追加
-          }
-
-          // (B) 関数本体の最初のステートメントを探す
-          if (top.state === 1 && ev.phase === 'enter') {
-            if (ev.nodeType === 'BlockStatement' && top.innerDepth < 0) {
-              // ブロック本体：次の depth+1 のノードが最初のステートメント
-              top.innerDepth = ev.depth + 1;
-            } else if (top.innerDepth < 0) {
-              // 式本体のアロー関数（BlockStatement なし）：このノードが本体
-              set.add(i);
-              top.state = 2;
-            } else if (ev.depth === top.innerDepth) {
-              // BlockStatement の直下の最初のステートメント
-              set.add(i);
-              top.state = 2;
-            }
-          }
-        }
-      }
-
-      if (ev.phase === 'exit' && ev.nodeType === 'CallExpression') {
-        const info = callStack.pop();
-        if (info && info.state > 0) set.add(i);   // (C) exit CallExpression を追加
-      }
-
-      // ③ IfStatement / ConditionalExpression：条件式 exit（1回のみ）
-      //    enter の直後が条件式の enter なので、そのmatchIdx が条件式 exit
-      if (ev.phase === 'enter' &&
-          (ev.nodeType === 'IfStatement' || ev.nodeType === 'ConditionalExpression')) {
-        if (i + 1 < trace.length && trace[i + 1].phase === 'enter') {
-          set.add(trace[i + 1].matchIdx);
-        }
-      }
-
-      // ④ WhileStatement / DoWhileStatement：繰り返し条件 exit
-      //    ループ範囲内の depth+1 の exit で BlockStatement 以外が条件式
-      if (ev.phase === 'enter' &&
-          (ev.nodeType === 'WhileStatement' || ev.nodeType === 'DoWhileStatement')) {
-        const loopDepth = ev.depth;
-        const endIdx    = ev.matchIdx;
-        for (let j = i + 1; j < endIdx; j++) {
-          const inner = trace[j];
-          if (inner.phase === 'exit' &&
-              inner.depth === loopDepth + 1 &&
-              inner.nodeType !== 'BlockStatement') {
-            set.add(j);
-          }
-        }
-      }
-
-      // ⑤ ForStatement：テスト式 exit（init=VariableDeclaration, body=BlockStatement 以外）
-      if (ev.phase === 'enter' && ev.nodeType === 'ForStatement') {
-        const forDepth = ev.depth;
-        const endIdx   = ev.matchIdx;
-        for (let j = i + 1; j < endIdx; j++) {
-          const inner = trace[j];
-          if (inner.phase === 'exit' &&
-              inner.depth === forDepth + 1 &&
-              inner.nodeType !== 'VariableDeclaration' &&
-              inner.nodeType !== 'BlockStatement') {
-            set.add(j);
-          }
-        }
-      }
-    }
-
-    // ⑥ ExpressionStatement：ネイティブ関数呼び出し等の「文として実行する式」
-    //    内部に既存の humanSet メンバーが存在しない ExpressionStatement の exit を追加する。
-    //    ユーザー定義関数呼び出し（rule②）や代入（rule①）が内部にある場合は
-    //    そちらで既に停止するため追加しない（二重停止を防ぐ）。
-    for (let i = 0; i < trace.length; i++) {
-      const ev = trace[i];
-      if (ev.phase === 'exit' && ev.nodeType === 'ExpressionStatement') {
-        const enterIdx = ev.matchIdx;
-        if (enterIdx < 0 || enterIdx >= trace.length) continue;
-        let hasInner = false;
-        for (let j = enterIdx + 1; j < i; j++) {
-          if (set.has(j)) { hasInner = true; break; }
-        }
-        if (!hasInner) set.add(i);
-      }
-    }
-
-    // ⑥b 失敗した ExpressionStatement（対応する exit が存在しない）
-    //    try ブロック内でホスト例外が発生した場合、失敗した文の
-    //    enter イベントは残るが exit イベントは存在しない。
-    //    matchIdx が正常な exit(ExpressionStatement) を指していない enter を
-    //    humanStep の停止点として追加する。
-    //    これにより「式ボタンで部分評価を確認→人/文ボタンで停止」が可能になる。
-    for (let i = 0; i < trace.length; i++) {
-      const ev = trace[i];
-      if (ev.phase === 'enter' && ev.nodeType === 'ExpressionStatement') {
-        const m = ev.matchIdx;
-        const hasProperExit = m >= 0
-          && m < trace.length
-          && trace[m].phase === 'exit'
-          && trace[m].nodeType === 'ExpressionStatement'
-          && trace[m].matchIdx === i;
-        if (!hasProperExit) set.add(i);
-      }
-    }
-
-    this._humanIndices = set;
-    return set;
-  }
-
-  /**
-   * ソースコードの指定行を返す（1 始まり）。
-   * @param {number} line
-   * @returns {string}
-   */
-  getSourceLine(line) {
-    if (!this._sourceLines) {
-      this._sourceLines = this.source.split('\n');
-    }
-    return (this._sourceLines[line - 1] || '').trim();
-  }
-
-  /**
-   * humanStep — 次の「意味のある変化点」まで進む
-   *
-   * リテラル・識別子・演算子の中間評価など、人間が紙でトレースしないような
-   * 細粒度のイベントをスキップする。
-   * @returns {StepResult}
-   */
-  humanStep() {
-    if (this.isDone()) return this._result();
-
-    const humanSet = this._getHumanIndices();
-    for (let i = this.cursor + 1; i < this.trace.length; i++) {
-      if (humanSet.has(i)) {
-        this.cursor = i;
-        return this._result();
-      }
-    }
-
-    this.cursor = this.trace.length;
-    return this._result();
-  }
-
-  /**
-   * humanStepBack — 直前の「意味のある変化点」に戻る
-   * cursor === 0 の場合は no-op。
-   * @returns {StepResult}
-   */
-  humanStepBack() {
-    if (this.cursor === 0) return this._result();
-
-    const humanSet = this._getHumanIndices();
-    for (let i = this.cursor - 1; i >= 0; i--) {
-      if (humanSet.has(i)) {
-        this.cursor = i;
-        return this._result();
-      }
-    }
-
-    this.cursor = 0;
-    return this._result();
-  }
-
-  // ─── 静的ファクトリ ──────────────────────────────────────────────────────────
-
-  /**
-   * 事前計算済みトレースから JSDebugger インスタンスを生成する（evaluate() をバイパス）。
-   * MaxStepsError をキャッチした側が部分トレースを閲覧可能にするために使う。
-   */
-  static fromTrace(source, trace, ast, consoleLogs) {
-    const inst       = Object.create(JSDebugger.prototype);
-    inst.source      = source;
-    inst.maxSteps    = 0;
-    inst.ast         = ast;
-    inst.trace       = trace;
-    inst.consoleLogs = consoleLogs;
-    inst.cursor      = 0;
-    inst._vdom       = null;
-    return inst;
-  }
-
-  // ─── 内部ヘルパー ────────────────────────────────────────────────────────────
-
-  /**
-   * @returns {StepResult}
-   *   done:      boolean
-   *   event:     TraceEvent | null
-   */
-  _result() {
-    return {
-      done:  this.isDone(),
-      event: this.getCurrentEvent(),
-    };
   }
 }
 

@@ -1,13 +1,11 @@
 import { Environment, deepClone, TDZ_SENTINEL } from './environment.js';
+import { ReturnSignal, BreakSignal, ContinueSignal, ThrowSignal } from '../core/signals.js';
+import { Recorder as CoreRecorder } from '../core/recorder.js';
 import { RuntimeError } from '../errors.js';
 import { parse } from '../parser/parser.js';
 
 // ─── 制御フロー用シグナル ──────────────────────────────────────────────────────
 
-class ReturnSignal  { constructor(v) { this.value = v; } }
-class BreakSignal   {}
-class ContinueSignal{}
-class ThrowSignal   { constructor(v) { this.value = v; } }
 
 // ─── Recorder ─────────────────────────────────────────────────────────────────
 
@@ -37,131 +35,21 @@ function formatLogArg(v, depth = 0) {
   return '{ ' + keys.map(k => `${k}: ${formatLogArg(v[k], depth + 1)}`).join(', ') + ' }';
 }
 
-class Recorder {
+/**
+ * JS 用の Recorder。共通コアの Recorder（src/core/recorder.js）に、JS 固有の設定を加える：
+ * - console.log の引数を formatLogArg で整形し、CLI でも見えるようホストの console にも出力する
+ * - DOM モードでは各 TraceEvent に VirtualDOM のスナップショット（domSnapshot）を付ける
+ */
+class Recorder extends CoreRecorder {
   constructor(maxSteps = 0) {
-    this.trace = [];          // TraceEvent[]
-    this.callStack = [];      // Frame[]  { name, loc, args }
-    this.consoleLogs = [];    // { atIndex: number, level: string, text: string }
-    this.frameEnvStack = [];  // Environment[]  各アクティブフレームの callEnv（push 順 = 外→内）
-    this.callSiteEnvs = [];   // Environment[]  各フレームを呼び出した地点の環境（frameEnvStack と同じ順）
-    this.curEnv = null;       // Environment    いま評価しているノードの環境
+    // 既存の挙動を保つため、引数の位置（index）を formatLogArg の depth としてそのまま渡す。
+    // そのため console.log(1, "a") は「1 'a'」になる（2 番目以降の文字列に引用符が付く）。
+    super(maxSteps, { formatLog: formatLogArg, echo: true });
     this.vdom = null;         // VirtualDocument | null（DOM モード時に JSDebugger がセット）
-    this.maxSteps = maxSteps; // 0 = 無制限
   }
 
-  /**
-   * console.log 等を横取りして consoleLogs に追記する。
-   * CLI 出力も維持するため、ネイティブ console にも転送する。
-   * @param {'log'|'warn'|'error'|'info'|'debug'} level
-   * @param {any[]} args
-   */
-  captureLog(level, args) {
-    const text = args.map(formatLogArg).join(' ');
-    // 記録：次に push される TraceEvent のインデックスを atIndex とする
-    this.consoleLogs.push({ atIndex: this.trace.length, level, text });
-    // CLI モードでもターミナルに出力する
-    if (level === 'error' || level === 'warn') {
-      console[level](text);
-    } else {
-      console.log(text);
-    }
-  }
-
-  /** 関数呼び出しのフレームを積む。呼び出した地点の環境（curEnv）もいっしょに覚える。 */
-  pushFrame(frame, callEnv) {
-    this.callStack.push(frame);
-    this.frameEnvStack.push(callEnv);
-    this.callSiteEnvs.push(this.curEnv);
-  }
-
-  popFrame() {
-    this.callStack.pop();
-    this.frameEnvStack.pop();
-    this.callSiteEnvs.pop();
-  }
-
-  /**
-   * 各アクティブフレームの変数を現時点でスナップショットする（外→内の順）。
-   * 呼び出し元のフレームは、次のフレームを呼び出した地点から見える変数（引数、関数本体やブロックの
-   * let/const）を含む。最も内側のフレームは、いま評価している環境 env から見える変数を含む。
-   */
-  snapshotFrames(env, seen) {
-    return this.frameEnvStack.map((callEnv, i) => callEnv.snapshotFrom(this.callSiteEnvs[i + 1] ?? env, seen));
-  }
-
-  /** 関数の呼び出し中に、グローバルのブロック（for の本体など）の変数をスナップショットする。 */
-  snapshotGlobalBlocks(seen) {
-    return this.callSiteEnvs[0]?.snapshotBlocks(seen) ?? {};
-  }
-
-  /**
-   * 1 つの TraceEvent に記録する変数のスナップショットをまとめて作る。
-   * クローンの対応表を共有するので、同じ配列やオブジェクトを指す変数は、どのフレームでも同じクローンを指す
-   * （呼び出し元と呼び出し先が同じ配列を共有していることが、スナップショットでもわかる）。
-   */
-  snapshotVars(env) {
-    const seen = new WeakMap();
-    return {
-      env:             env.snapshot(seen),
-      frameEnvs:       this.snapshotFrames(env, seen),
-      globalBlockVars: this.snapshotGlobalBlocks(seen),
-    };
-  }
-
-  /**
-   * enter/exit のペアを記録し、matchIdx で相互リンクする。
-   * fn() の戻り値を返す。
-   */
-  record(node, env, depth, callDepth, fn) {
-    if (this.maxSteps > 0 && this.trace.length >= this.maxSteps) {
-      throw new RangeError(`[MaxSteps] 実行が最大ステップ数 ${this.maxSteps.toLocaleString()} を超えたため停止しました`);
-    }
-    const prevEnv = this.curEnv;
-    this.curEnv = env;
-
-    const enterIdx = this.trace.length;
-    this.trace.push({
-      phase: 'enter',
-      nodeType: node.type,
-      loc: node.loc || { line: 0, column: 0 },
-      end: node.end || null,
-      depth,
-      callDepth,
-      callStack: this.callStack.map(f => ({ ...f })),
-      ...this.snapshotVars(env),
-      domSnapshot: this.vdom ? this.vdom.snapshot() : null,
-      value: undefined,
-      matchIdx: -1,
-    });
-
-    const rawValue = fn();
-    this.curEnv = prevEnv;
-
-    // ReturnSignal / ThrowSignal を unwrap: trace には実際の値を記録し、
-    // シグナル本体はそのまま return して制御フロー伝播に使う
-    let traceValue = rawValue;
-    if (rawValue instanceof ReturnSignal || rawValue instanceof ThrowSignal) {
-      traceValue = rawValue.value;
-    }
-
-    // exit 時点で再スナップショットする（ローカル変数が更新されている可能性があるため）
-    const exitIdx = this.trace.length;
-    this.trace.push({
-      phase: 'exit',
-      nodeType: node.type,
-      loc: node.loc || { line: 0, column: 0 },
-      end: node.end || null,
-      depth,
-      callDepth,
-      callStack: this.callStack.map(f => ({ ...f })),
-      ...this.snapshotVars(env),
-      domSnapshot: this.vdom ? this.vdom.snapshot() : null,
-      value: traceValue,
-      matchIdx: enterIdx,
-    });
-    this.trace[enterIdx].matchIdx = exitIdx;
-
-    return rawValue;
+  eventExtras() {
+    return { domSnapshot: this.vdom ? this.vdom.snapshot() : null };
   }
 }
 

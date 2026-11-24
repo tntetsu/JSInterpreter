@@ -186,6 +186,23 @@ const vars = dbg.getVariables('all');
 const stack = dbg.getCallStack();
 ```
 
+### Shared core (for evaluators of other languages)
+
+`js-interpreter/core` exports the language-independent parts: `Recorder`, `TraceDebugger`, `Scope`, `deepClone`/`createCloner`, the control-flow signals, `ExecutionError`, and `joinConsoleLines`. An evaluator for another language records its own AST with `Recorder.record()` and subclasses `TraceDebugger`, giving its node types to humanStep via `static nodeCategories`. `JSDebugger` itself is such a subclass. See [docs/detailed-design.md §12](docs/detailed-design.md) and [ADR-015](docs/adr/ADR-015-shared-core.md).
+
+```javascript
+import { Recorder, Scope, TraceDebugger, EMPTY_CATEGORIES } from 'js-interpreter/core';
+
+class MyDebugger extends TraceDebugger {
+  static nodeCategories = { ...EMPTY_CATEGORIES, stopOnExit: ['Assign'] };
+  constructor(source) {
+    const recorder = new Recorder(100_000);
+    myEvaluate(myParse(source), new Scope(null, 'global'), recorder);  // calls recorder.record(node, env, depth, callDepth, fn)
+    super({ source, trace: recorder.trace, consoleLogs: recorder.consoleLogs });
+  }
+}
+```
+
 ### TraceEvent structure
 
 Each step carries:
@@ -256,6 +273,9 @@ JSDebugger     step control via index manipulation on trace[]
 
 src/errors.js  shared error classes (LexError, ParseError, RuntimeError)
                imported by all pipeline stages — breaks circular dependencies
+
+src/core/      language-independent shared core (Recorder, TraceDebugger, Scope, deepClone, signals)
+               the JS Recorder / Environment / JSDebugger are subclasses; also used by other languages
 ```
 
 The codebase uses **ES Modules** (`"type": "module"` in package.json). All files use `import`/`export` syntax.
@@ -278,7 +298,7 @@ npx jest src/interpreter/debugger.test.js
 npm run test:watch
 ```
 
-257 tests across 5 files.
+284 tests across 6 files.
 
 ## Known Limitations
 

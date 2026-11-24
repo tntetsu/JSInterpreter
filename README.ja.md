@@ -186,6 +186,23 @@ const vars = dbg.getVariables('all');
 const stack = dbg.getCallStack();
 ```
 
+### 共通コア（他の言語の評価器向け）
+
+`js-interpreter/core` は、言語に依存しない部品（`Recorder`・`TraceDebugger`・`Scope`・`deepClone`/`createCloner`・制御シグナル・`ExecutionError`・`joinConsoleLines`）を公開します。他の言語の評価器は、自分の AST を `Recorder.record()` で記録し、`TraceDebugger` の派生クラスを作って、humanStep に使うノード型を `static nodeCategories` で与えます。`JSDebugger` 自身もこの派生クラスです。詳しくは [docs/detailed-design.ja.md §12](docs/detailed-design.ja.md) と [ADR-015](docs/adr/ADR-015-shared-core.md)。
+
+```javascript
+import { Recorder, Scope, TraceDebugger, EMPTY_CATEGORIES } from 'js-interpreter/core';
+
+class MyDebugger extends TraceDebugger {
+  static nodeCategories = { ...EMPTY_CATEGORIES, stopOnExit: ['Assign'] };
+  constructor(source) {
+    const recorder = new Recorder(100_000);
+    myEvaluate(myParse(source), new Scope(null, 'global'), recorder);  // 中で recorder.record(node, env, depth, callDepth, fn) を呼ぶ
+    super({ source, trace: recorder.trace, consoleLogs: recorder.consoleLogs });
+  }
+}
+```
+
 ### TraceEvent の構造
 
 各ステップは以下の情報を持ちます。
@@ -256,6 +273,9 @@ JSDebugger     trace[] のインデックス操作でステップ制御
 
 src/errors.js  共通エラークラス（LexError, ParseError, RuntimeError）
                全パイプラインステージからインポート — 循環依存を解消
+
+src/core/      言語非依存の共通コア（Recorder, TraceDebugger, Scope, deepClone, シグナル）
+               JS の Recorder / Environment / JSDebugger はこれらの派生クラス。他の言語の評価器も使う
 ```
 
 コードベースは **ES Modules**（package.json の `"type": "module"`）を採用し、全ファイルで `import`/`export` 構文を使用します。
@@ -278,7 +298,7 @@ npx jest src/interpreter/debugger.test.js
 npm run test:watch
 ```
 
-テストは 5 ファイル・257 件です。
+テストは 6 ファイル・284 件です。
 
 ## 既知の制限・未実装機能
 

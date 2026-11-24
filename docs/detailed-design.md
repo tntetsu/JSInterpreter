@@ -47,6 +47,14 @@ Source code (string)
 ```
 src/
 ├── errors.js             LexError, ParseError, RuntimeError  (shared — breaks circular deps)
+├── core/                 Language-independent shared core (exported as js-interpreter/core; §12)
+│   ├── index.js          Re-exports the public names
+│   ├── signals.js        ReturnSignal, BreakSignal, ContinueSignal, ThrowSignal
+│   ├── clone.js          deepClone, createCloner (per-language clone rules via a hook)
+│   ├── scope.js          Scope (bindings, parent, kind, snapshots)
+│   ├── recorder.js       Recorder, joinConsoleLines
+│   ├── trace-debugger.js TraceDebugger, ExecutionError, finalizePartialTrace
+│   └── core.test.js
 ├── lexer/
 │   ├── lexer.js          Lexer, Token, TokenType
 │   └── lexer.test.js
@@ -54,10 +62,10 @@ src/
 │   ├── parser.js         Parser, parse()
 │   └── parser.test.js
 ├── interpreter/
-│   ├── environment.js    Environment, deepClone, TDZ_SENTINEL
-│   ├── interpreter.js    evaluate(), run(), record(), Recorder
+│   ├── environment.js    Environment (extends Scope), deepClone (re-export), TDZ_SENTINEL
+│   ├── interpreter.js    evaluate(), run(), record(), Recorder (extends the core Recorder)
 │   ├── interpreter.test.js
-│   ├── debugger.js       JSDebugger
+│   ├── debugger.js       JSDebugger (extends TraceDebugger), ExecutionError (re-export)
 │   └── debugger.test.js
 ├── index.js              Entry point (CLI)
 web/
@@ -1246,10 +1254,11 @@ Variable snapshots are obtained via `getMergedVars(event)` (same logic as `rende
 | `src/lexer/lexer.test.js` | Lexer | 50 |
 | `src/parser/parser.test.js` | Parser | 42 |
 | `src/interpreter/interpreter.test.js` | Interpreter / Recorder | 55 |
-| `src/interpreter/debugger.test.js` | JSDebugger | 52 |
+| `src/interpreter/debugger.test.js` | JSDebugger | 61 |
 | `src/interpreter/virtual-dom.test.js` | VirtualDOM | 58 |
+| `src/core/core.test.js` | Shared core (used from another language's evaluator) | 18 |
 
-**Total: 257 tests**
+**Total: 284 tests**
 
 ### 9.2 Debugger Test Policy
 
@@ -1283,3 +1292,46 @@ Variable snapshots are obtained via `getMergedVars(event)` (same logic as `rende
 | Conditional breakpoints | Add `condition: string` to `continue()` argument and evaluate to decide whether to stop |
 | Watch expressions | Add `watch(expr: string)` to `JSDebugger` and append evaluated values at each step |
 | Generators | Add `function*` / `yield` execution support to interpreter |
+
+---
+
+## 12. Shared Core (src/core/)
+
+Language-independent parts shared with evaluators for other languages (e.g. Python in PyVisualizer). Exported as `js-interpreter/core` (`exports` in `package.json`). The JS parts are subclasses of these; their public names and behavior are unchanged. Background: [ADR-015](adr/ADR-015-shared-core.md).
+
+### 12.1 Parts and their JS subclasses
+
+| Core | Role | JS subclass (what it adds) |
+|---|---|---|
+| `Recorder(maxSteps, { clone, formatLog, echo })` | Records enter/exit, variable snapshots, call stack, output | `Recorder` (interpreter.js): formatting with `formatLogArg`, echo to the host console, `domSnapshot` via `eventExtras()` |
+| `Scope(parent, kind)` | `bindings`, `parent`, `kind`, `define`, snapshots (`snapshot`, `snapshotOwn`, `snapshotFrom`, `snapshotBlocks`; all take a `clone`) | `Environment` (environment.js): `immutables`, `markConst`, `getFunctionScope`, `get`/`set` with TDZ and undefined-variable errors |
+| `TraceDebugger({ source, trace, ast, consoleLogs, maxSteps })` | State queries, stepping, humanStep, `static fromTrace()` | `JSDebugger` (debugger.js): runs JS (including DOM mode), `static nodeCategories = JS_NODE_CATEGORIES`, `getEventSequenceSkeleton()` |
+| `deepClone(val, seen, hook)` / `createCloner(hook)` | Cloning for snapshots (rules in §4.3) | — |
+| `ExecutionError`, `finalizePartialTrace(trace)` | Partial trace on runtime errors | Used by the `JSDebugger` constructor |
+
+`TraceDebugger.fromTrace()` returns an instance of the class it is called on (`JSDebugger.fromTrace()` returns a `JSDebugger`).
+
+### 12.2 Node categories for humanStep (nodeCategories)
+
+The stop rules ①–⑥b of §7.5 are expressed with per-role lists instead of nodeType names.
+
+| Role | Rule | JS (`JS_NODE_CATEGORIES`) |
+|---|---|---|
+| `stopOnExit` | ① always stop at exit | VariableDeclaration, AssignmentExpression, UpdateExpression, ReturnStatement, ThrowStatement |
+| `call` | ② user-defined calls (3 stops) | CallExpression |
+| `block` | ② first statement of a function body; excluded in ④⑤ | BlockStatement |
+| `branch` | ③ exit of the condition | IfStatement, ConditionalExpression |
+| `condLoop` | ④ exit of the condition on every iteration | WhileStatement, DoWhileStatement |
+| `forLoop` / `forInit` | ⑤ exits of test/update (excluding init) | ForStatement / VariableDeclaration |
+| `exprStmt` | ⑥ exit of an expression statement with no inner stop; ⑥b enter of a failed one | ExpressionStatement |
+
+Other languages give their own nodeTypes via `static nodeCategories` on a subclass. A node the evaluator records on its own (e.g. Python records each loop-variable assignment of `for` as `LoopBinding`) also becomes a stop when listed in `stopOnExit`.
+
+### 12.3 Output fragments (write)
+
+`captureLog(level, args)` still records one entry per line (`{ atIndex, level, text }`). `write(text, level)` records output that may contain newlines as fragments split at each newline, `{ atIndex, level, text, eol }` (a fragment ending mid-line has `eol: false`). `joinConsoleLines(logs)` merges a mixed array into one entry per line (each line's `atIndex` is where the line was completed).
+
+### 12.4 Clone hook
+
+`deepClone(val, seen, hook)` uses the result of `hook(val, clone, seen)` when it is not `undefined`. Use it to keep the markers of per-language mutable values (e.g. arrays with a non-enumerable marker). The hook must call `seen.set(val, newClone)` before cloning children (for cycles). Passing `createCloner(hook)` as the `clone` option of `Recorder` applies it to every snapshot.
+
