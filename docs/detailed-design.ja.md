@@ -725,6 +725,8 @@ Node.js 互換のフォーマットルール:
 | `JSPromise`（fulfilled） | `Promise { value }` | `Promise { value }` |
 | `JSPromise`（rejected） | `Promise { <rejected> reason }` | `Promise { <rejected> reason }` |
 
+最上位の引数は、何番目でも `depth === 0` で整形する（JS の `Recorder` は共通コアに `formatLog: (v) => formatLogArg(v)` を渡す。コアは `formatLog(value, index)` と呼ぶので、`formatLogArg` を直接渡すと添字が depth になる。[ADR-016](adr/ADR-016-console-log-top-level-strings.md)）。
+
 `__` で始まるキーはオブジェクト表示から除外する（内部マーカー）。
 
 ```js
@@ -1255,11 +1257,11 @@ const e = event.end.column;        // 0-based 終端位置（exclusive）
 | `src/lexer/lexer.test.js` | Lexer | 50 |
 | `src/parser/parser.test.js` | Parser | 42 |
 | `src/interpreter/interpreter.test.js` | Interpreter・Recorder | 55 |
-| `src/interpreter/debugger.test.js` | JSDebugger | 61 |
+| `src/interpreter/debugger.test.js` | JSDebugger | 64 |
 | `src/interpreter/virtual-dom.test.js` | VirtualDOM | 58 |
 | `src/core/core.test.js` | 共通コア（別の言語の評価器から使う場合） | 18 |
 
-**合計: 284テスト**
+**合計: 287テスト**
 
 ### 9.2 デバッガーテストの方針
 

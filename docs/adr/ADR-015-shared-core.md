@@ -39,11 +39,11 @@ JS の部品はコアの派生クラスにする。外から見える名前・im
 
 ## 挙動を変えていないことの確認
 
-- 既存のテスト 266 件がそのまま通る（共通コアのテスト 18 件を追加し、計 284 件）
+- 既存のテスト 266 件がそのまま通る（共通コアのテスト 18 件を追加し、計 284 件。ADR-016 の取り込み後は 287 件）
 - master と作業ブランチの両方の `JSDebugger` で同じプログラムを実行し、全 TraceEvent・consoleLogs・humanStep の停止点・getResult・例外を比べた（PyVisualizer の `scripts/compare-js-core.mjs`）。対象は JSVisualizer の組み込みサンプルと記事の題材、examples、BhvVisualizer の授業の演習、エラー・上限超過・DOM モードなどの追加ケースの計 194 プログラム（約 24 万イベント）で、すべて一致した。スタックオーバーフローで止まるプログラムは、止まる深さが実行ごとに変わる（ADR-014）ため、共通の長さまでを比べた
 
 ## 結果
 
 - 他の言語の評価器は `js-interpreter/core` だけを使えばよい。PyVisualizer の Python エンジンは、Phase 0 の回避策をすべて外してコアの API に乗せ換えた
-- 既存の挙動を保つため、`console.log` の 2 番目以降の文字列の引数に引用符が付く挙動（`console.log(1, "a")` が `1 'a'` になる。`args.map(formatLogArg)` で配列の添字が depth として渡っていたため。Node.js では `1 a`）もそのまま残した。この挙動は不具合で、修正は ADR-016（ブランチ `fix/console-log-args`）で提案している。修正を master にマージしたら、このブランチを追従させ、JS の Recorder を `formatLog: (v) => formatLogArg(v)` に直す
+- `console.log` の 2 番目以降の文字列の引数に引用符が付く既存の不具合（`console.log(1, "a")` が `1 'a'` になる）は、切り出しの時点では挙動を変えないためそのまま残した。その後 ADR-016 で master を直し（2026-11-24）、このブランチにも取り込んだ（JS の Recorder は `formatLog: (v) => formatLogArg(v)`）
 - コアの `Recorder` は、既定では端末に出力しない（JS の `Recorder` は従来どおり出力する）

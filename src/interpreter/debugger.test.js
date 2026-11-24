@@ -753,3 +753,30 @@ describe('frameEnvs / globalBlockVars', () => {
   });
 });
 
+
+describe('console.log の出力（consoleLogs、ADR-016）', () => {
+  const logsOf = (src) => {
+    const orig = { log: console.log, warn: console.warn, error: console.error };
+    console.log = console.warn = console.error = () => {};
+    try {
+      return new JSDebugger(src).consoleLogs.map(l => l.text);
+    } finally {
+      Object.assign(console, orig);
+    }
+  };
+
+  test('最上位の引数の文字列は、何番目でも引用符を付けない（Node.js と同じ）', () => {
+    expect(logsOf('console.log(1, "a");')).toEqual(['1 a']);
+    expect(logsOf('console.log("insert", 2, "at", 0);')).toEqual(['insert 2 at 0']);
+    expect(logsOf('console.log("a", "b", "c");')).toEqual(['a b c']);
+  });
+
+  test('配列・オブジェクトの中の文字列には引用符を付ける（何番目の引数でも同じ）', () => {
+    expect(logsOf('console.log(["a"], "x", { k: "v" }, [1, ["b"]]);'))
+      .toEqual(["[ 'a' ] x { k: 'v' } [ 1, [ 'b' ] ]"]);
+  });
+
+  test('console.warn / console.error も同じ規則', () => {
+    expect(logsOf('console.warn("w", "x");\nconsole.error(0, "e");')).toEqual(['w x', '0 e']);
+  });
+});
