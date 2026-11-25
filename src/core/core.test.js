@@ -220,3 +220,34 @@ describe('Scope のスナップショット', () => {
     expect(blk.snapshotBlocks()).toEqual({ b: 3 });
   });
 });
+
+describe('イベントの値はその時点の値（ADR-017）', () => {
+  test('配列の値は、exit の時点の中身で複製される（あとで変えても過去のイベントは変わらない）', () => {
+    const rec = new Recorder();
+    const env = new Scope(null, 'global');
+    const arr = [1];
+    rec.record({ type: 'Ref', loc: L(1) }, env, 0, 0, () => arr);
+    arr.push(2);
+    expect(rec.trace[1].value).toEqual([1]);
+  });
+
+  test('同じ時点の変数と同じ配列なら、スナップショットでも同じ複製を指す', () => {
+    const rec = new Recorder();
+    const env = new Scope(null, 'global');
+    const arr = [1, 2];
+    env.define('a', arr);
+    rec.record({ type: 'Ref', loc: L(1) }, env, 0, 0, () => arr);
+    expect(rec.trace[1].value).toBe(rec.trace[1].env[0].a);
+  });
+
+  test('言語ごとのクローン（hook）で複製する', () => {
+    const marked = (xs) => Object.defineProperty([...xs], '__mark', { value: 'm', enumerable: false });
+    const hook = (v, clone, seen) => {
+      if (!Array.isArray(v) || !v.__mark) return undefined;
+      const c = marked([]); seen.set(v, c); for (const x of v) c.push(clone(x)); return c;
+    };
+    const rec = new Recorder(0, { clone: createCloner(hook) });
+    rec.record({ type: 'Ref', loc: L(1) }, new Scope(null, 'global'), 0, 0, () => marked([3]));
+    expect(rec.trace[1].value.__mark).toBe('m');
+  });
+});
