@@ -101,8 +101,7 @@ class Recorder {
    * クローンの対応表を共有するので、同じ配列やオブジェクトを指す変数は、どのフレームでも同じクローンを指す
    * （呼び出し元と呼び出し先が同じ配列を共有していることが、スナップショットでもわかる）。
    */
-  snapshotVars(env) {
-    const seen = new WeakMap();
+  snapshotVars(env, seen = new WeakMap()) {
     return {
       env:             env.snapshot(seen),
       frameEnvs:       this.snapshotFrames(env, seen),
@@ -146,7 +145,10 @@ class Recorder {
       traceValue = rawValue.value;
     }
 
-    // exit 時点で再スナップショットする（ローカル変数が更新されている可能性があるため）
+    // exit 時点で再スナップショットする（ローカル変数が更新されている可能性があるため）。
+    // 値も同じ対応表で複製する：配列・オブジェクトの値を参照のまま残すと、あとで中身が変わったとき、
+    // 過去のイベントの値まで変わって見える（ADR-017）。同じ配列を指す変数とは、同じ複製を指す
+    const seen = new WeakMap();
     const exitIdx = this.trace.length;
     this.trace.push({
       phase: 'exit',
@@ -156,9 +158,9 @@ class Recorder {
       depth,
       callDepth,
       callStack: this.callStack.map(f => ({ ...f })),
-      ...this.snapshotVars(env),
+      ...this.snapshotVars(env, seen),
       domSnapshot: this.vdom ? this.vdom.snapshot() : null,
-      value: traceValue,
+      value: deepClone(traceValue, seen),
       matchIdx: enterIdx,
     });
     this.trace[enterIdx].matchIdx = exitIdx;
