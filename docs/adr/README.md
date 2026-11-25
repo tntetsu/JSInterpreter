@@ -41,3 +41,4 @@ ADR・CLAUDE.mdの記述と日付を突き合わせて再構成しました（AD
 | [014](ADR-014-recursion-depth-limit.md) | 再帰の深さの限界は、今は直さない | 2026-11-04 |
 | [015](ADR-015-shared-core.md) | 言語非依存の共通コア（src/core/）を切り出す | 2026-11-24 | 高（決定と同時に作成） |
 | [016](ADR-016-console-log-top-level-strings.md) | console.log の 2 番目以降の文字列の引数に引用符が付く不具合を直す | 2026-11-24 | 高（決定と同時に作成） |
+| [017](ADR-017-trace-value-snapshot.md) | トレースのイベントの値を、その時点の値として記録する | 2026-11-25 | 高（決定と同時に作成） |

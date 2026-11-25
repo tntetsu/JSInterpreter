@@ -780,3 +780,35 @@ describe('console.log の出力（consoleLogs、ADR-016）', () => {
     expect(logsOf('console.warn("w", "x");\nconsole.error(0, "e");')).toEqual(['w x', '0 e']);
   });
 });
+
+describe('トレースの値はその時点の値（ADR-017）', () => {
+  const quiet = (f) => {
+    const orig = console.log;
+    console.log = () => {};
+    try { return f(); } finally { console.log = orig; }
+  };
+  const exits = (src, type) => quiet(() => new JSDebugger(src)).trace.filter(e => e.phase === 'exit' && e.nodeType === type);
+
+  test('配列を指す式の値は、その式を評価した時点の中身で記録される（あとで配列を変えても変わらない）', () => {
+    const ids = exits('const arr = [1];\narr.push(2);\narr[0] = 9;', 'Identifier').filter(e => e.loc.line === 2);
+    expect(ids[0].value).toEqual([1]);
+  });
+
+  test('関数に渡した配列の値は、呼び出した時点の中身（バブルソートの bubbleSort([5, 3, …]) が整列後にならない）', () => {
+    const src = 'function sort(a) {\n  a.sort();\n  return a;\n}\nsort([3, 1, 2]);';
+    const arrays = exits(src, 'ArrayExpression');
+    expect(arrays[0].value).toEqual([3, 1, 2]);
+    const call = exits(src, 'CallExpression').find(e => e.loc.line === 5);
+    expect(call.value).toEqual([1, 2, 3]);
+  });
+
+  test('同じ時点の変数とイベントの値が同じ配列なら、スナップショットでも同じものを指す', () => {
+    const ev = exits('const arr = [1, 2];\nlet x = arr;', 'Identifier').find(e => e.loc.line === 2);
+    expect(ev.value).toBe(ev.env[0].arr ?? ev.env.find(f => 'arr' in f).arr);
+  });
+
+  test('関数の値は複製せず、そのまま記録する（置換のビューがユーザー定義の関数か判定するため）', () => {
+    const ev = exits('function f() { return 1; }\nf();', 'Identifier').find(e => e.loc.line === 2);
+    expect(ev.value.__type__).toBe('JSFunction');
+  });
+});
